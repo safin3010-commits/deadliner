@@ -699,7 +699,6 @@ async def mode_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("_mode")
 
     if mode == "remind_interval":
-        # Пользователь написал интервал для напоминания
         task_id = context.user_data.get("_remind_task_id")
         task_title = context.user_data.get("_remind_task_title", "Задача")
         context.user_data.pop("_mode", None)
@@ -707,26 +706,82 @@ async def mode_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             from grok import ask_grok
             import json as _json
+
+            now = datetime.datetime.now(tz=UFA_TZ)
+            now_str = now.strftime("%d.%m.%Y %H:%M")
+
+            # Берём дедлайн задачи если есть
+            tasks = get_tasks()
+            task_obj = next((t for t in tasks if str(t["id"]) == str(task_id)), None)
+            deadline_str = ""
+            deadline_iso = ""
+            if task_obj and task_obj.get("deadline"):
+                try:
+                    dl = datetime.datetime.fromisoformat(task_obj["deadline"]).astimezone(UFA_TZ)
+                    deadline_str = dl.strftime("%d.%m.%Y %H:%M")
+                    deadline_iso = dl.isoformat()
+                    days_to_deadline = (dl - now).days
+                except Exception:
+                    pass
+
+            deadline_hint = f"Дедлайн задачи: {deadline_str} (через {days_to_deadline} дн.)" if deadline_str else "Дедлайн не указан"
+
             prompt = (
-                f"Текст: \"{text}\"\n"
-                f"Определи интервал напоминания в минутах и количество раз.\n"
-                f"Примеры: 'каждый час 3 раза' → interval=60, times=3; "
-                f"'каждые 30 минут 5 раз' → interval=30, times=5; "
-                f"'раз в 2 часа до дедлайна' → interval=120, times=12.\n"
-                f"Ответь ТОЛЬКО JSON: {{\"interval\": число, \"times\": число}}"
+                f"Текст пользователя: \"{text}\"\n"
+                f"Сейчас: {now_str}\n"
+                f"{deadline_hint}\n\n"
+                f"Определи параметры напоминания и верни JSON:\n"
+                f"{{\"interval\": минуты, \"times\": количество, \"start_at\": \"DD.MM.YYYY HH:MM или null\"}}\n\n"
+                f"Правила:\n"
+                f"1. 'каждый час 3 раза' → interval=60, times=3, start_at=null\n"
+                f"2. 'каждые 30 минут 5 раз' → interval=30, times=5, start_at=null\n"
+                f"3. 'за неделю до дедлайна раз в день' → interval=1440, times=7, start_at=дедлайн минус 7 дней\n"
+                f"4. 'за неделю до дедлайна в 19:00' → interval=1440, times=7, start_at=дедлайн минус 7 дней в 19:00\n"
+                f"5. 'каждый день начиная с пятницы' → interval=1440, times=7, start_at=ближайшая пятница\n"
+                f"6. 'напомни 3 мая в 10:00' → interval=0, times=1, start_at=03.05.{now.year} 10:00\n"
+                f"7. 'каждое утро в 9:00 до дедлайна' → interval=1440, times=дней_до_дедлайна, start_at=завтра 09:00\n"
+                f"8. 'раз в 2 часа 10 раз с завтра' → interval=120, times=10, start_at=завтра 09:00\n"
+                f"9. Если start_at=null — первое напоминание через interval минут от сейчас\n"
+                f"10. ТОЛЬКО JSON без пояснений"
             )
-            result = await ask_grok(prompt, system="Отвечай только JSON.")
+
+            result = await ask_grok(prompt, system="Ты анализатор напоминаний. Отвечай только валидным JSON.")
             result = re.sub(r'```[a-z]*\n?', '', result).strip()
-            data = _json.loads(result)
+            result = re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
+            data = _json.loads(re.search(r'\{.*\}', result, re.DOTALL).group())
+
             interval = int(data.get("interval", 60))
             times = int(data.get("times", 3))
+            start_at_str = data.get("start_at")
+
+            # Парсим start_at
+            start_at_iso = None
+            if start_at_str and start_at_str not in ("null", "None", ""):
+                try:
+                    start_dt = datetime.datetime.strptime(start_at_str, "%d.%m.%Y %H:%M").replace(tzinfo=UFA_TZ)
+                    start_at_iso = start_dt.isoformat()
+                except Exception:
+                    start_dt = await _parse_dt_smart(start_at_str)
+                    if start_dt:
+                        start_at_iso = start_dt.isoformat()
 
             from reminders import add_reminder, format_interval
-            add_reminder(str(task_id), task_title, interval, times)
+            add_reminder(str(task_id), task_title, interval, times, start_at=start_at_iso)
+
+            # Формируем подтверждение
+            start_fmt = ""
+            if start_at_iso:
+                try:
+                    s = datetime.datetime.fromisoformat(start_at_iso).astimezone(UFA_TZ)
+                    start_fmt = f"\n📅 Начало: {s.strftime('%d.%m.%Y %H:%M')}"
+                except Exception:
+                    pass
+
+            interval_str = format_interval(interval) if interval > 0 else "однократно"
             await update.message.reply_text(
                 f"🔔 *Напоминание установлено!*\n\n"
                 f"📌 {task_title}\n"
-                f"⏱ {format_interval(interval)}, {times} раз",
+                f"⏱ {interval_str}, {times} раз{start_fmt}",
                 parse_mode="Markdown"
             )
         except Exception as e:
@@ -1054,6 +1109,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("Нажми 🎓 Оценки чтобы загрузить")
 
     # ── Напоминания ───────────────────────────────────────────────────
+    elif data.startswith("rem_done:"):
+        # Отметить задачу выполненной прямо из напоминания
+        parts = data.split(":")
+        task_id = parts[1] if len(parts) > 1 else ""
+        rem_id = parts[2] if len(parts) > 2 else ""
+        from reminders import delete_reminder
+        if rem_id:
+            delete_reminder(rem_id)
+        if task_id:
+            mark_task_done(task_id)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text("✅ Задача выполнена, напоминание удалено!")
+
+    elif data.startswith("rem_skip:"):
+        # Пропустить это напоминание (mark_sent уже вызван, просто убираем кнопки)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.answer("⏭ Пропущено")
+
     elif data.startswith("remind_task:"):
         task_id = data.split(":")[1]
         tasks = get_tasks()

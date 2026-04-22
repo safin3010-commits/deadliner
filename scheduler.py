@@ -736,19 +736,81 @@ async def check_messenger_and_notify(bot, chat_id: int):
 async def check_user_reminders(bot, chat_id: int):
     """Проверяем пользовательские напоминания каждые 5 минут."""
     try:
-        now_h = datetime.datetime.now(tz=UFA_TZ).hour
-        if 0 <= now_h < 9:
-            return  # Тихие часы — не беспокоим
-        from reminders import get_due_reminders, mark_sent
+        now = datetime.datetime.now(tz=UFA_TZ)
+        now_h = now.hour
+        if 0 <= now_h < 9 or now_h >= 23:
+            return  # Тихие часы
+
+        from reminders import get_due_reminders, mark_sent, delete_reminder
+        from storage import get_tasks
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
         due = get_due_reminders()
+        tasks = get_tasks()
+        tasks_by_id = {str(t["id"]): t for t in tasks}
+
         for r in due:
-            text = (
+            task_id = str(r.get("task_id", ""))
+            task_obj = tasks_by_id.get(task_id)
+
+            # П.5 — если задача выполнена — удаляем напоминание
+            if task_obj and task_obj.get("done"):
+                delete_reminder(r["id"])
+                print(f"Reminder: задача выполнена, удаляем напоминание {r['id']}")
+                continue
+
+            # П.1 — дедлайн в тексте
+            deadline_line = ""
+            if task_obj and task_obj.get("deadline"):
+                try:
+                    dl = datetime.datetime.fromisoformat(task_obj["deadline"]).astimezone(UFA_TZ)
+                    days_left = (dl.date() - now.date()).days
+                    if days_left == 0:
+                        deadline_line = "\n📅 Дедлайн: _сегодня!_"
+                    elif days_left == 1:
+                        deadline_line = "\n📅 Дедлайн: _завтра_"
+                    elif days_left > 0:
+                        deadline_line = f"\n📅 Дедлайн: _через {days_left} дн. ({dl.strftime('%d.%m')})_"
+                    else:
+                        deadline_line = f"\n📅 Дедлайн: _просрочен ({dl.strftime('%d.%m')})_"
+                except Exception:
+                    pass
+
+            # П.3 — время следующего напоминания
+            times_left_after = r["times_left"] - 1
+            next_line = ""
+            if times_left_after > 0 and r.get("interval_minutes", 0) > 0:
+                next_dt = now + datetime.timedelta(minutes=r["interval_minutes"])
+                next_line = f"\n⏭ {next_dt.strftime('%d.%m %H:%M')} (×{times_left_after})"
+            elif times_left_after == 0:
+                next_line = "\n_Это последнее напоминание_"
+
+            msg_text = (
                 f"🔔 *Напоминание*\n\n"
-                f"📌 {r['task_title']}\n"
-                f"_Осталось напоминаний: {r['times_left'] - 1}_"
+                f"📌 {r['task_title']}"
+                f"{deadline_line}"
+                f"{next_line}"
             )
-            await send_with_retry(bot, chat_id, text)
+
+            # П.2 — кнопки в уведомлении
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Выполнено", callback_data=f"rem_done:{task_id}:{r['id']}"),
+                InlineKeyboardButton("⏭ Пропустить", callback_data=f"rem_skip:{r['id']}"),
+            ]])
+
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=msg_text,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
+                )
+                _jarvis_write(msg_text)
+            except Exception as e:
+                print(f"Reminder send error: {e}")
+
             mark_sent(r["id"])
+
     except Exception as e:
         print(f"Scheduler user reminders error: {e}")
 
