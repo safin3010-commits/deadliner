@@ -1,0 +1,22 @@
+# Секреты
+.env
+.env.save
+
+# Данные (куки, кэши, seen, токены)
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+
+# macOS
+.DS_Store
+
+# Логи
+*.log
+# Сессии и случайные файлы
+*.session
+.envvk*
+.idea/
