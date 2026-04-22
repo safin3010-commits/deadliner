@@ -458,202 +458,133 @@ async def send_subject_theory(bot, chat_id: int):
 
 
 async def send_english_theory(bot, chat_id: int):
+    """Урок английского — слово из JSON + правило из JSON + объяснение через DeepSeek."""
     try:
+        import json as _json
+        import random as _random
         from grok import ask_grok
-        seen = _load_seen()
-        count = seen.get("english_count", 0)
-        if count >= 5:
+
+        WORDS_FILE = "data/english_words.json"
+        WORDS_BACKUP = "data/english_words_backup.json"
+        RULES_FILE = "data/english_rules.json"
+        RULES_BACKUP = "data/english_rules_backup.json"
+
+        # ── Берём слово ──────────────────────────────────────────────
+        def _load(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return _json.load(f)
+            except Exception:
+                return []
+
+        def _save(path, data):
+            os.makedirs("data", exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                _json.dump(data, f, ensure_ascii=False, indent=2)
+
+        def _pick_and_remove(work_path, backup_path):
+            items = _load(work_path)
+            if not items:
+                # Список закончился — восстанавливаем из бэкапа и перемешиваем
+                items = _load(backup_path)
+                if not items:
+                    return None
+                _random.shuffle(items)
+                _save(work_path, items)
+                print(f"study_theory: список восстановлен из {backup_path}")
+            item = items.pop(0)
+            _save(work_path, items)
+            return item
+
+        word = _pick_and_remove(WORDS_FILE, WORDS_BACKUP)
+        rule = _pick_and_remove(RULES_FILE, RULES_BACKUP)
+
+        if not word or not rule:
+            print("study_theory: нет слов или правил")
             return
-        seen["english_count"] = count + 1
-        _save_seen(seen)
-        english_topic = None
-        try:
-            schedule = await get_todays_schedule()
-            for lesson in schedule:
-                name = lesson.get("course_name") or lesson.get("name") or ""
-                if "английск" in name.lower() or "english" in name.lower() or "иностранн" in name.lower():
-                    t = lesson.get("name") or ""
-                    if t and t != name:
-                        english_topic = t
-                        break
-        except Exception:
-            pass
-        ENGLISH_TYPES = [
-            ("Новые слова",           "words"),
-            ("Грамматика",            "grammar"),
-            ("Фразовые глаголы",      "phrasal"),
-            ("Лайфхаки",              "tips"),
-            ("Идиомы и выражения",    "idioms"),
-            ("Новые слова по теме",   "words"),
-            ("Грамматика vs ошибки",  "grammar_errors"),
-        ]
-        day = datetime.datetime.now(tz=UFA_TZ).weekday()
-        task_type, task_kind = ENGLISH_TYPES[day]
 
-        if task_kind == "words":
-            words_no_repeat = _get_words_history(seen)
-            topic_hint = f'по теме "{english_topic}"' if english_topic else "на бытовую или разговорную тему"
-            prompt = (
-                f"Дай ровно 10 английских слов {topic_hint} уровня Pre-Intermediate.\n"
-                f"{words_no_repeat + chr(10) if words_no_repeat else ''}"
-                f"\nСтрого следуй формату для каждого слова (без отступлений):\n\n"
-                f"*слово* [транскрипция МФА] — перевод на русский\n"
-                f"Английское предложение с этим словом.\n"
-                f"Перевод этого предложения на русский.\n\n"
-                f"Между словами — пустая строка.\n"
-                f"Слова должны быть полезными в разговорной речи.\n"
-                f"НЕ используй базовые слова: apple, cat, house, book, table, school, car.\n"
-                f"НЕ добавляй никаких вступлений, заголовков, пояснений — только список слов."
-            )
-        elif task_kind == "grammar":
-            rule, new_idx = _get_next_grammar_rule(seen)
-            seen["grammar_index"] = new_idx
-            no_repeat_topics = _get_topics_history(seen)
-            prompt = (
-                f"Объясни грамматическое правило: {rule}\n"
-                f"{no_repeat_topics + chr(10) if no_repeat_topics else ''}"
-                f"\nФорматирование строго для Telegram Markdown:\n"
-                f"— Название правила жирным: *Название*\n"
-                f"— Формула жирным: *Subject + V2*\n"
-                f"— Примеры курсивом: _I went to school_\n"
-                f"— Между блоками пустая строка\n"
-                f"— НЕ используй #, -, * как маркеры списков\n\n"
-                f"Структура:\n"
-                f"*Правило* — одна строка с названием\n"
-                f"*Когда используется* — 2-3 предложения простыми словами\n"
-                f"*Формула* — структура предложения\n"
-                f"*Примеры* — ровно 5 примеров, каждый с переводом на русский\n"
-                f"*Типичные ошибки русскоязычных* — 2-3 конкретные ошибки с исправлением\n"
-                f"*Сравнение* — чем отличается от похожих правил (1-2 предложения)\n\n"
-                f"Объём: 300-380 слов. Умещайся в одно сообщение Telegram (до 4000 символов)."
-            )
-            _add_to_history(seen, f"grammar:{rule[:40]}")
-        elif task_kind == "phrasal":
-            phrasal_no_repeat = _get_phrasal_history(seen)
-            prompt = (
-                f"Дай 7 популярных фразовых глаголов для разговорной речи уровня Pre-Intermediate.\n"
-                f"{phrasal_no_repeat + chr(10) if phrasal_no_repeat else ''}"
-                f"\nСтрогий формат для каждого (без вступлений):\n\n"
-                f"*глагол + предлог* — перевод\n"
-                f"Английское предложение-пример.\n"
-                f"Перевод предложения на русский.\n\n"
-                f"Между глаголами — пустая строка.\n"
-                f"НЕ добавляй никаких вступлений и заголовков — только список."
-            )
-        elif task_kind == "idioms":
-            idioms_no_repeat = _get_idioms_history(seen)
-            prompt = (
-                f"Дай 7 популярных английских идиом которые реально используют в речи и кино.\n"
-                f"{idioms_no_repeat + chr(10) if idioms_no_repeat else ''}"
-                f"\nСтрогий формат для каждой (без вступлений):\n\n"
-                f"*идиома* — буквальный перевод → реальное значение\n"
-                f"Английское предложение-пример.\n"
-                f"Перевод предложения на русский.\n\n"
-                f"Между идиомами — пустая строка.\n"
-                f"НЕ добавляй никаких вступлений и заголовков — только список."
-            )
-        elif task_kind == "grammar_errors":
-            error_topic, new_idx = _get_next_grammar_error_topic(seen)
-            seen["grammar_errors_index"] = new_idx
-            no_repeat_topics = _get_topics_history(seen)
-            prompt = (
-                f"Тема: {error_topic}\n"
-                f"{no_repeat_topics + chr(10) if no_repeat_topics else ''}"
-                f"\nПокажи 4 частые ошибки русскоязычных студентов по этой теме.\n"
-                f"\nФормат для каждой ошибки (строго, без отступлений):\n\n"
-                f"*Название ошибки*\n"
-                f"❌ Неправильно: пример предложения\n"
-                f"✅ Правильно: исправленный пример\n"
-                f"Объяснение: почему так, 2-3 предложения простым языком.\n"
-                f"Перевод правильного примера на русский.\n\n"
-                f"Между ошибками — пустая строка.\n"
-                f"НЕ добавляй вступлений, заголовков раздела, итоговых фраз — только 4 ошибки.\n"
-                f"Уложись в 3500 символов."
-            )
-            _add_to_history(seen, f"errors:{error_topic[:40]}")
-        else:
-            no_repeat_topics = _get_topics_history(seen)
-            prompt = (
-                f"Дай 5 конкретных лайфхаков как быстрее запоминать английские слова и правила.\n"
-                f"{no_repeat_topics + chr(10) if no_repeat_topics else ''}"
-                f"\nДля каждого лайфхака:\n"
-                f"*Название лайфхака*\n"
-                f"Описание — 2-3 предложения.\n"
-                f"Пример упражнения которое можно сделать прямо сейчас.\n\n"
-                f"Между лайфхаками — пустая строка."
-            )
+        w = word["word"]
+        transcription = word.get("transcription", "")
+        translation = word.get("translation", "")
+        rule_name = rule["rule"]
+        rule_category = rule.get("category", "")
+        rule_desc = rule.get("description", "")
 
-        theory = await ask_grok(
-            prompt,
-            system="Ты преподаватель английского. Строго следуй формату. Пиши живым языком. Без воды, вступлений и лишних пояснений.",
-            smart=True
-        )
+        # ── Промпт для DeepSeek ──────────────────────────────────────
+        prompt = f"""Ты преподаватель английского для русскоязычного студента уровня Pre-Intermediate.
+
+Слово: {w} {transcription} — {translation}
+Правило: {rule_name} ({rule_category}) — {rule_desc}
+
+Составь подробный урок в формате Telegram Markdown. Строго следуй структуре:
+
+🇬🇧 *АНГЛИЙСКИЙ*
+
+━━━━━━━━━━━━━━━━━━━━
+📌 *СЛОВО — {w.upper()}*
+━━━━━━━━━━━━━━━━━━━━
+🔤 Транскрипция: {transcription}
+🇷🇺 Перевод: {translation}
+
+🧠 *Как запомнить:*
+[Ассоциация или мнемоника — 2-3 предложения простым языком]
+
+📝 *Примеры:*
+- [Английское предложение]
+  [Перевод на русский]
+- [Ещё английское предложение]
+  [Перевод на русский]
+
+🔄 Синонимы: [2-3 синонима]
+❌ Антоним: [антоним если есть]
+
+━━━━━━━━━━━━━━━━━━━━
+📚 *ПРАВИЛО — {rule_name}*
+━━━━━━━━━━━━━━━━━━━━
+🤔 *Что это простыми словами:*
+[Объяснение как для чайника — 3-4 предложения. Без умных слов. Представь что объясняешь другу.]
+
+✅ *Формула:*
+[Структура предложения]
+
+📝 *Примеры:*
+- [Английский пример] ✅
+  [Перевод]
+- [Ещё пример] ✅
+  [Перевод]
+
+❌ *Частые ошибки русских:*
+- [Неправильно] → [Правильно]
+- [Неправильно] → [Правильно]
+
+💡 *Запомни:*
+[Лайфхак или правило-подсказка — 1-2 предложения]
+
+━━━━━━━━━━━━━━━━━━━━
+🔗 *СЛОВО + ПРАВИЛО*
+━━━━━━━━━━━━━━━━━━━━
+- [Предложение где слово {w} используется в контексте правила {rule_name}]
+  [Перевод]
+- [Ещё одно предложение]
+  [Перевод]
+
+Правила форматирования:
+- Используй *жирный* для заголовков и ключевых слов
+- Используй _курсив_ для переводов если нужно
+- НЕ используй ** двойные звёздочки
+- НЕ добавляй ничего от себя кроме того что в структуре
+- Объём: 400-500 слов"""
+
+        theory = await ask_grok(prompt, system="Ты преподаватель английского. Строго следуй структуре. Объясняй как чайнику.", smart=False)
         if not theory:
             return
 
-        # Сохраняем слова/фразовые/идиомы в историю
-        if task_kind == "words":
-            found_words = re.findall(r'\*([a-zA-Z][a-zA-Z ]{1,20}?)\*', theory)
-            if found_words:
-                _add_words_to_history(seen, found_words)
-        elif task_kind == "phrasal":
-            found = re.findall(r'\*([a-zA-Z]+ (?:up|off|on|out|in|down|back|away|over|through|around|about)[a-zA-Z ]*)\*', theory)
-            if found:
-                _add_phrasal_to_history(seen, found)
-        elif task_kind == "idioms":
-            found = re.findall(r'\*([^*]{4,40})\*', theory)
-            if found:
-                _add_idioms_to_history(seen, found)
+        await _send_long_message(bot, chat_id, theory)
+        print(f"study_theory: английский отправлен — слово={w}, правило={rule_name}")
 
-        _save_seen(seen)
-
-        # Слово дня — добавляем к каждому уроку своё содержимое
-        word_block = ""
-        try:
-            wod = await _fetch_word_of_day()
-            if wod and wod.get("word"):
-                w = wod["word"]
-                tr = wod.get("transcription", "")
-                tl = wod.get("translation", "")
-                ex = wod.get("example", "")
-                ex_ru = wod.get("example_ru", "")
-                if count == 1:
-                    # Урок 1 — новое слово
-                    word_block = (
-                        f"\n{'─' * 20}\n"
-                        f"📝 СЛОВО ДНЯ\n"
-                        f"────────────────────\n"
-                        f"{w.upper()}  {tr}\n"
-                        f"Перевод: {tl}\n"
-                        f"Пример: {ex}\n"
-                        f"({ex_ru})"
-                    )
-                elif count == 2:
-                    # Урок 2 — пример с этим словом
-                    word_block = (
-                        f"\n{'─' * 20}\n"
-                        f"📝 СЛОВО ДНЯ — ПРАКТИКА\n"
-                        f"────────────────────\n"
-                        f"Сегодняшнее слово: {w.upper()} — {tl}\n"
-                        f"Пример: {ex}\n"
-                        f"({ex_ru})"
-                    )
-                elif count >= 3:
-                    # Урок 3 — мини-тест
-                    word_block = (
-                        f"\n{'─' * 20}\n"
-                        f"📝 СЛОВО ДНЯ — ПОВТОРЕНИЕ\n"
-                        f"────────────────────\n"
-                        f"Помнишь слово дня? Подсказка: {tl}\n"
-                        f"Ответ: {w.upper()}  {tr}"
-                    )
-        except Exception as e:
-            print(f"Word of day block error: {e}")
-
-        header = (
-            f"🇬🇧 *АНГЛИЙСКИЙ — {task_type.upper()}*\n\n"
-        )
-        await _send_long_message(bot, chat_id, header + theory + word_block)
-        print(f"study_theory: английский отправлен (#{count+1})")
     except Exception as e:
         print(f"study_theory english error: {e}")
+        import traceback
+        traceback.print_exc()
+
+
