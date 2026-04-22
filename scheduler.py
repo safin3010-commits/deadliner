@@ -967,22 +967,24 @@ async def _send_random_motivation(bot, chat_id: int):
             )
             ai_line = await ask_grok(prompt)
 
-        # Цитата великого человека
+        # Цитата великого человека — ZenQuotes
         quote_text = ""
         quote_author = ""
         try:
             import httpx as _httpx
-            async with _httpx.AsyncClient(timeout=8) as _client:
-                _r = await _client.get(
-                    "http://api.forismatic.com/api/1.0/",
-                    params={"method": "getQuote", "lang": "ru", "format": "json"}
-                )
+            async with _httpx.AsyncClient(timeout=8, follow_redirects=True) as _client:
+                _r = await _client.get("https://zenquotes.io/api/random")
                 if _r.status_code == 200:
-                    _data = _r.json()
-                    quote_text = _data.get("quoteText", "").strip()
-                    quote_author = _data.get("quoteAuthor", "").strip()
+                    _data = _r.json()[0]
+                    quote_en = _data.get("q", "").strip()
+                    quote_author = _data.get("a", "").strip()
+                    if quote_en:
+                        translated = await ask_grok(
+                            f"Переведи эту мотивационную цитату на русский, сохрани смысл и стиль. Только перевод без кавычек и пояснений:\n{quote_en}"
+                        )
+                        quote_text = translated if translated else quote_en
         except Exception as e:
-            print(f"Forismatic motivation error: {e}")
+            print(f"ZenQuotes motivation error: {e}")
 
         lines = ["⚡️ *Не расслабляйся*", ""]
 
@@ -1116,27 +1118,22 @@ async def _fetch_weather() -> str:
             if eve_item is None and hour in (18, 19, 20, 21):
                 eve_item = item
 
-        out = ["🌡️ *Погода в Чесноковке:*\n"]
-        out.append(f"  *Сейчас:* {_icon(now_desc)} {now_desc}, {now_temp}°C (ощущается {now_feels}°C){now_precip}")
-        out.append(f"  💨 {now_wind} м/с (порывы {now_gust} м/с)")
+        out = []
+        out.append(f"🌤 Сейчас {_icon(now_desc)} {now_temp}°C, {now_desc.lower()}, ветер {now_wind} м/с{now_precip}")
 
         if day_item:
             d_temp = round(day_item["main"]["temp"])
-            d_feels = round(day_item["main"]["feels_like"])
             d_desc = day_item["weather"][0]["description"].capitalize()
             d_wind = round(day_item["wind"]["speed"])
             d_precip = _precip(day_item)
-            out.append(f"\n  *Днём:* {_icon(d_desc)} {d_desc}, {d_temp}°C (ощущается {d_feels}°C){d_precip}")
-            out.append(f"  💨 {d_wind} м/с")
+            out.append(f"🌤 Днём {_icon(d_desc)} {d_temp}°C, {d_desc.lower()}, ветер {d_wind} м/с{d_precip}")
 
         if eve_item:
             e_temp = round(eve_item["main"]["temp"])
-            e_feels = round(eve_item["main"]["feels_like"])
             e_desc = eve_item["weather"][0]["description"].capitalize()
             e_wind = round(eve_item["wind"]["speed"])
             e_precip = _precip(eve_item)
-            out.append(f"\n  *Вечером:* {_icon(e_desc)} {e_desc}, {e_temp}°C (ощущается {e_feels}°C){e_precip}")
-            out.append(f"  💨 {e_wind} м/с")
+            out.append(f"🌤 Вечером {_icon(e_desc)} {e_temp}°C, {e_desc.lower()}, ветер {e_wind} м/с{e_precip}")
 
         return "\n".join(out)
 

@@ -29,8 +29,17 @@ def save_tasks(tasks: list) -> None:
 
 def add_task(title: str, deadline: str | None, source: str) -> dict:
     tasks = get_tasks()
+    # Берём максимальный числовой ID чтобы избежать дублей
+    max_id = 0
+    for t in tasks:
+        try:
+            tid = int(t["id"])
+            if tid > max_id:
+                max_id = tid
+        except (ValueError, TypeError):
+            pass
     task = {
-        "id": len(tasks) + 1,
+        "id": max_id + 1,
         "title": title,
         "deadline": deadline,
         "source": source,
