@@ -541,11 +541,31 @@ async def fetch_grades_for_subject(cur_id: str) -> dict | None:
         # Сортируем по дате
         lessons_data.sort(key=lambda x: x["date"] or "")
 
+        # Считаем оставшиеся встречи — всего встреч в курсе минус прошедшие
+        today = datetime.datetime.now(tz=UFA_TZ).date()
+        total_lessons_count = 0
+        passed_lessons_count = 0
+        for c2 in primary.get("courseUnitRealizations", []):
+            if c2["id"] != cur_id:
+                continue
+            for lesson in c2.get("lessons", []):
+                total_lessons_count += 1
+                lesson_date_str = lesson.get("eventStartsAtLocal", "")
+                if lesson_date_str:
+                    try:
+                        lesson_date = datetime.datetime.fromisoformat(lesson_date_str).date()
+                        if lesson_date <= today:
+                            passed_lessons_count += 1
+                    except Exception:
+                        pass
+        remaining = max(0, total_lessons_count - passed_lessons_count)
+
         return {
             "cur_id": cur_id,
             "course_name": course_name,
             "lessons": lessons_data,
             "total": cur_totals.get(cur_id, ""),
+            "remaining_lessons": remaining if total_lessons_count > 0 else None,
         }
     except Exception as e:
         print(f"fetch_grades_for_subject error: {e}")

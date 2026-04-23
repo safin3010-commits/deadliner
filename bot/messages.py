@@ -128,7 +128,7 @@ def _get_filtered_tasks(tasks: list, filter_type: str) -> list:
         return sorted(filtered, key=sort_key)
     elif filter_type == "all":
         # Просроченные — не старше 3 дней, остальные — все
-        with_date = [t for t in pending if t.get("deadline") and days_left(t) >= -3]
+        with_date = [t for t in pending if t.get("deadline") and days_left(t) >= -10]
         without_date = [t for t in pending if not t.get("deadline")]
         # Ручные с датой первыми, потом остальные с датой, потом без даты
         manual_with = sorted([t for t in with_date if t.get("source") == "manual"], key=lambda t: t.get("deadline", ""))
@@ -624,10 +624,24 @@ def format_subject_grades(data: dict) -> str:
                 next_str = f"До 3: нужно ещё *{need:.1f}* баллов"
 
             lines.append(f"🏆 {grade_str}")
-            if next_str:
-                lines.append(f"📈 {next_str}")
+
+            # Нужно набрать до каждой оценки
+            needs = []
+            for grade_label, threshold in [("3", thresholds["3"]), ("4", thresholds["4"]), ("5", thresholds["5"])]:
+                diff = threshold - total_num
+                if diff > 0:
+                    needs.append(f"  • До оценки {grade_label}: *+{diff:.1f}* балл{'а' if diff < 5 else 'ов'}")
+            if needs:
+                lines.append(f"🎯 *Нужно набрать:*")
+                lines.extend(needs)
+
         except Exception:
             lines.append(f"📊 *Текущий итог: {total}*")
+
+    # Осталось встреч
+    remaining = data.get("remaining_lessons")
+    if remaining is not None:
+        lines.append(f"📅 Осталось ~{remaining} встреч")
 
     return "\n".join(lines)
 

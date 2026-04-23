@@ -161,9 +161,11 @@ async def fetch_netology_deadlines() -> tuple[list, list]:
                     elif item_type in ["task", "test", "quiz"] and not passed:
                         deadline_dt = _parse_deadline_from_title(title)
 
-                        # Пропускаем если дедлайн уже прошёл
+                        # Пропускаем если дедлайн прошёл более 10 дней назад
                         if deadline_dt and deadline_dt.astimezone(datetime.UTC) < now:
-                            continue
+                            days_overdue = (now - deadline_dt.astimezone(datetime.UTC)).days
+                            if days_overdue > 10:
+                                continue
 
                         all_homework.append({
                             "id": f"netology_{item_id}",

@@ -161,9 +161,11 @@ async def fetch_lms_deadlines() -> list:
                     r_task = await client.get(link)
                     deadline_dt = _parse_deadline_from_page(r_task.text)
 
-                    # Пропускаем если дедлайн уже прошёл
+                    # Пропускаем если дедлайн прошёл более 10 дней назад
                     if deadline_dt and deadline_dt < now:
-                        continue
+                        days_overdue = (now - deadline_dt).days
+                        if days_overdue > 10:
+                            continue
 
                     all_tasks.append({
                         "id": task_id,

@@ -517,21 +517,7 @@ async def grades_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=grades_subjects_keyboard(subjects),
             parse_mode="Markdown"
         )
-        # Groq анализ — 2 предложения
-        try:
-            from grok import ask_grok
-            all_totals = [(s["name"], s["total"]) for s in subjects if s.get("total")]
-            summary = ", ".join(f"{n}: {t}" for n, t in all_totals[:8])
-            prompt = (
-                f"Оценки студента: {summary}. "
-                f"Пороги: 3=61 (матанализ 51), 4=76, 5=91. "
-                f"РОВНО 2 предложения: что хорошо и что нужно подтянуть. Без воды."
-            )
-            grok_text = await ask_grok(prompt)
-            if grok_text:
-                await update.message.reply_text(f"🤖 {grok_text}", parse_mode="Markdown")
-        except Exception:
-            pass
+
     except Exception as e:
         await msg.edit_text(f"❌ Ошибка: {e}")
 
@@ -1404,7 +1390,6 @@ def register_handlers(app):
     app.add_handler(CommandHandler("itog", itog_command))
     app.add_handler(CommandHandler("streak", streak_command))
     app.add_handler(CommandHandler("grades", grades_cmd))
-    app.add_handler(CommandHandler("analysis", analysis_command))
     app.add_handler(CommandHandler("quiz", quiz_command))
     app.add_handler(CommandHandler("quizstop", quizstop_command))
 

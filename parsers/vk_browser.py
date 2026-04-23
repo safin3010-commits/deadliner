@@ -64,37 +64,12 @@ def _decode_vk_links(text: str) -> str:
 
 
 async def _format_with_ai(text: str) -> str:
-    """Форматируем текст через DeepSeek."""
-    try:
-        from grok import ask_grok
-        # Сначала декодируем ссылки
-        text = _decode_vk_links(text)
-        prompt = (
-            f"Вот сообщение из студенческой беседы ВКонтакте с расписанием:\n\n{text}\n\n"
-            f"Отформатируй кратко и красиво для Telegram по этому шаблону:\n"
-            f"☀️ Доброе утро! Расписание на сегодня:\n"
-            f"📅 День недели, число месяца\n"
-            f"────────────────────\n"
-            f"🕐 ВРЕМЯ — НАЗВАНИЕ ПАРЫ\n"
-            f"   Группы/мастерские если есть\n"
-            f"   [Ссылка на занятие](прямая_ссылка)\n"
-            f"────────────────────\n"
-            f"Правила:\n"
-            f"- Используй только прямые ссылки mts-link.ru или zoom, НЕ vk.com\n"
-            f"- Ссылки оформляй как [Ссылка](url) в Markdown\n"
-            f"- Убери лишние ссылки на группы ВК\n"
-            f"- Кратко, только суть: время, название, преподаватель, ссылка\n"
-            f"- Без длинных описаний и обозначений дисциплин"
-        )
-        # Заменяем двойные звёздочки на одинарные для Telegram Markdown
-        result = await ask_grok(prompt, system="Ты форматировщик расписания для Telegram. Используй *одинарные* звёздочки для жирного, НЕ двойные. Отвечай только готовым текстом без пояснений.")
-        if result:
-            import re
-            result = re.sub(r'\*\*(.+?)\*\*', r'*\1*', result)
-        return result if result else text
-    except Exception as e:
-        print(f"VK AI format error: {e}")
-        return text
+    """Возвращаем текст как есть — без AI форматирования."""
+    text = _decode_vk_links(text)
+    # Заменяем двойные звёздочки на одинарные для Telegram Markdown
+    import re
+    text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+    return text
 
 
 async def fetch_todays_vk_messages() -> list:
@@ -192,6 +167,9 @@ async def fetch_todays_vk_messages() -> list:
             new_messages = []
             for text in messages:
                 if len(text.strip()) < 20:
+                    continue
+                # Отправляем только сообщения со ссылками
+                if "http://" not in text and "https://" not in text:
                     continue
                 msg_hash = hashlib.md5(text.encode()).hexdigest()[:16]
                 if not _is_hash_seen(msg_hash):
