@@ -373,13 +373,33 @@ async def sync_all_tasks():
         elif isinstance(netology_result, list):
             netology_tasks = netology_result
 
+        # Перезагружаем после mark_lms_tasks_done — он мог изменить файл
+        existing_tasks = get_tasks()
+        existing_ids = {t.get("id") for t in existing_tasks}
+
+        updated = 0
         for t in (lms_tasks or []) + (netology_tasks or []):
-            key = (t.get("title", ""), t.get("course_name", ""), t.get("deadline", ""))
-            if t.get("id") not in existing_ids and key not in existing_keys:
-                existing_tasks.append(t)
-                existing_ids.add(t.get("id"))
-                existing_keys.add(key)
-                added += 1
+            task_id = t.get("id")
+            # Если задача уже есть — обновляем дедлайн если изменился
+            found = False
+            for existing in existing_tasks:
+                if str(existing.get("id")) == str(task_id):
+                    found = True
+                    if existing.get("deadline") != t.get("deadline") and t.get("deadline"):
+                        existing["deadline"] = t["deadline"]
+                        updated += 1
+                        print(f"Scheduler: обновлён дедлайн: {t.get('title','')[:40]}")
+                    break
+            if not found:
+                key = (t.get("title", ""), t.get("course_name", ""))
+                existing_key_pairs = {(e.get("title",""), e.get("course_name","")) for e in existing_tasks}
+                if key not in existing_key_pairs:
+                    existing_tasks.append(t)
+                    existing_ids.add(task_id)
+                    added += 1
+
+        if updated:
+            print(f"Scheduler: обновлено дедлайнов: {updated}")
 
         save_tasks(existing_tasks)
         if added:

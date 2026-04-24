@@ -417,17 +417,28 @@ async def sync_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif isinstance(netology_result, list):
             netology_tasks = netology_result
 
+        updated = 0
         for t in lms_tasks + netology_tasks:
-            key = (t.get("title", ""), t.get("course_name", ""), t.get("deadline", ""))
-            if t["id"] not in existing_ids and key not in existing_keys:
-                tasks.append(t)
-                existing_ids.add(t["id"])
-                existing_keys.add(key)
-                added += 1
+            task_id = t.get("id")
+            found = False
+            for existing in tasks:
+                if str(existing.get("id")) == str(task_id):
+                    found = True
+                    if existing.get("deadline") != t.get("deadline") and t.get("deadline"):
+                        existing["deadline"] = t["deadline"]
+                        updated += 1
+                    break
+            if not found:
+                key = (t.get("title", ""), t.get("course_name", ""))
+                existing_key_pairs = {(e.get("title",""), e.get("course_name","")) for e in tasks}
+                if key not in existing_key_pairs:
+                    tasks.append(t)
+                    existing_ids.add(task_id)
+                    added += 1
 
         save_tasks(tasks)
         await msg.edit_text(
-            f"✅ *Синхронизация завершена!*\n\nДобавлено: *{added}*\nВсего в базе: *{len(tasks)}*",
+            f"✅ *Синхронизация завершена!*\n\nДобавлено: *{added}*\nОбновлено дедлайнов: *{updated}*\nВсего в базе: *{len(tasks)}*",
             parse_mode="Markdown"
         )
     except Exception as e:
