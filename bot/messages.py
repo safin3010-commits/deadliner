@@ -470,6 +470,8 @@ def new_messenger_message(msg_data: dict) -> str:
     content = _esc(content[:600])
 
     return (
+        f"💬 <b>Яндекс Мессенджер</b>\n"
+        f"\n"
         f"💬 <b>Новое сообщение</b>\n"
         f"{'─' * 20}\n"
         f"👤 <b>{sender}</b>\n"

@@ -1497,6 +1497,10 @@ async def send_midday_briefing(bot, chat_id: int):
 
 async def send_evening_briefing(bot, chat_id: int):
     """21:00 — вечерний брифинг + итоги дня объединённые."""
+    if _is_evening_sent():
+        print("Scheduler: вечерний брифинг уже был сегодня — пропускаем")
+        return
+    _mark_evening_sent()
     try:
         print("Scheduler: вечерний брифинг 21:00...")
         await sync_all_tasks()
@@ -2014,6 +2018,7 @@ async def check_lms_grades_and_notify(bot, chat_id: int):
 
 
 MIDDAY_SENT_FILE = "data/midday_sent.json"
+EVENING_SENT_FILE = "data/evening_sent.json"
 
 
 def _is_midday_sent() -> bool:
@@ -2210,32 +2215,32 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
 
     # ── Утро 9:00 ──
     scheduler.add_job(send_morning_briefing, trigger="cron", hour=9, minute=0,
-                      args=[bot, chat_id], id="morning_9", misfire_grace_time=60)
+                      args=[bot, chat_id], id="morning_9", misfire_grace_time=3600)
     # check_deadline_reminders убран — дедлайны показываются в утреннем брифинге
 
     # 9:30 английский #1
     scheduler.add_job(send_english_theory_job, trigger="cron", hour=9, minute=30,
-                      args=[bot, chat_id], id="theory_english_930", misfire_grace_time=60)
+                      args=[bot, chat_id], id="theory_english_930", misfire_grace_time=3600)
 
     # 14:00 дневная сводка
     scheduler.add_job(send_midday_briefing, trigger="cron", hour=14, minute=0,
-                      args=[bot, chat_id], id="midday_14", misfire_grace_time=60)
+                      args=[bot, chat_id], id="midday_14", misfire_grace_time=3600)
 
     # 11:00 теория по предмету
     scheduler.add_job(send_subject_theory_job, trigger="cron", hour=11, minute=0,
-                      args=[bot, chat_id], id="theory_subject_1100", misfire_grace_time=60)
+                      args=[bot, chat_id], id="theory_subject_1100", misfire_grace_time=3600)
 
     # 15:30 английский #2
     scheduler.add_job(send_english_theory_job, trigger="cron", hour=15, minute=30,
-                      args=[bot, chat_id], id="theory_english_1530", misfire_grace_time=60)
+                      args=[bot, chat_id], id="theory_english_1530", misfire_grace_time=3600)
 
     # ── Вечер 21:00 — вечерний брифинг + итоги дня ──
     scheduler.add_job(send_evening_briefing, trigger="cron", hour=21, minute=0,
-                      args=[bot, chat_id], id="evening_21", misfire_grace_time=60)
+                      args=[bot, chat_id], id="evening_21", misfire_grace_time=3600)
 
     # 21:30 английский #3
     scheduler.add_job(send_english_theory_job, trigger="cron", hour=21, minute=30,
-                      args=[bot, chat_id], id="theory_english_2130", misfire_grace_time=60)
+                      args=[bot, chat_id], id="theory_english_2130", misfire_grace_time=3600)
 
 
     # 13:00 цитата дня
@@ -2248,7 +2253,7 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
 
     # ── Воскресенье 20:00 недельный отчёт ──
     scheduler.add_job(send_weekly_report, trigger="cron", day_of_week="sun", hour=20, minute=0,
-                      args=[bot, chat_id], id="weekly_report", misfire_grace_time=60)
+                      args=[bot, chat_id], id="weekly_report", misfire_grace_time=3600)
 
     # ВК мониторинг каждые 15 минут (8:00-22:00)
     scheduler.add_job(check_vk_and_notify, trigger="interval", minutes=15,
