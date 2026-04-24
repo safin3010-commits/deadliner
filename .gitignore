@@ -20,3 +20,5 @@ venv/
 *.session
 .envvk*
 .idea/
+jarvis.py
+start_jarvis.sh

@@ -43,13 +43,43 @@ VK_USER_TOKEN = os.getenv("VK_USER_TOKEN")
 # Yandex TTS
 YANDEX_TTS_KEY = os.getenv("YANDEX_TTS_KEY")
 
-# OpenRouter
-OPENROUTER_KEYS = [k for k in [
-    os.getenv("OPENROUTER_KEY_1"),
-    os.getenv("OPENROUTER_KEY_2"),
-    os.getenv("OPENROUTER_KEY_3"),
-    os.getenv("OPENROUTER_KEY_4"),
-] if k]
+# OpenRouter — читаем все ключи OPENROUTER_KEY_* динамически
+import random as _random
+_openrouter_keys = []
+_i = 1
+while True:
+    _k = os.getenv(f"OPENROUTER_KEY_{_i}")
+    if not _k:
+        break
+    _openrouter_keys.append(_k)
+    _i += 1
+_random.shuffle(_openrouter_keys)
+OPENROUTER_KEYS = _openrouter_keys
 
 # OpenWeatherMap
 OPENWEATHER_KEY = os.getenv("OPENWEATHER_KEY")
+
+# Groq — фоллбэк когда OpenRouter исчерпан
+_groq_keys = []
+_gi = 1
+while True:
+    _gk = os.getenv(f"GROQ_KEY_{_gi}")
+    if not _gk:
+        break
+    _groq_keys.append(_gk)
+    _gi += 1
+_random.shuffle(_groq_keys)
+GROQ_KEYS = _groq_keys
+
+# Личные данные
+USER_NAME = os.getenv("USER_NAME", "Студент")
+USER_CITY = os.getenv("USER_CITY", "")
+
+# Погода
+WEATHER_LAT = float(os.getenv("WEATHER_LAT", "55.7558"))
+WEATHER_LON = float(os.getenv("WEATHER_LON", "37.6173"))
+
+# ВКонтакте
+VK_CHAT_URL = os.getenv("VK_CHAT_URL", "")
+VK_PROXY = os.getenv("VK_PROXY", "")
+CHROME_PATH = os.getenv("CHROME_PATH", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")

@@ -19,7 +19,7 @@ import os, sys
 import asyncio
 import logging
 from telegram.ext import Application
-from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID
+from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID, MODEUS_USERNAME, LMS_USERNAME, NETOLOGY_EMAIL, YANDEX_MAIL, OPENROUTER_KEYS, OPENWEATHER_KEY, VK_CHAT_URL
 from bot.handlers import register_handlers
 from scheduler import setup_scheduler
 from storage import ensure_data_dir
@@ -32,6 +32,52 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+
+SETUP_WARNED_FILE = "data/setup_warned.json"
+
+def _is_setup_warned() -> bool:
+    import json, os
+    try:
+        with open(SETUP_WARNED_FILE) as f:
+            return json.load(f).get("warned", False)
+    except Exception:
+        return False
+
+def _mark_setup_warned():
+    import json, os
+    os.makedirs("data", exist_ok=True)
+    with open(SETUP_WARNED_FILE, "w") as f:
+        json.dump({"warned": True}, f)
+
+async def check_setup(bot):
+    """Проверяем заполненность .env и отправляем предупреждение если что-то не заполнено."""
+    if _is_setup_warned():
+        return
+    issues = []
+    if not OPENROUTER_KEYS:
+        issues.append("⚠️ *OpenRouter* — AI не работает (нет OPENROUTER_KEY_1)\nРегистрация: openrouter.ai")
+    if not MODEUS_USERNAME:
+        issues.append("⚠️ *Modeus* — нет расписания и оценок (нет MODEUS_USERNAME/PASSWORD)")
+    if not LMS_USERNAME:
+        issues.append("⚠️ *LMS* — нет заданий (нет LMS_USERNAME/PASSWORD)")
+    if not NETOLOGY_EMAIL:
+        issues.append("⚠️ *Нетология* — нет заданий (нет NETOLOGY_EMAIL/PASSWORD)")
+    if not YANDEX_MAIL:
+        issues.append("⚠️ *Почта* — нет уведомлений о письмах (нет YANDEX_MAIL/APP_PASSWORD)")
+    if not OPENWEATHER_KEY:
+        issues.append("⚠️ *Погода* — не будет в утреннем брифинге (нет OPENWEATHER_KEY)")
+    if not VK_CHAT_URL:
+        issues.append("⚠️ *ВКонтакте* — мониторинг беседы выключен (нет VK_CHAT_URL)")
+    if not issues:
+        return
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    text = "🔧 *Не заполнены некоторые настройки .env:*\n\n" + "\n\n".join(issues)
+    text += "\n\n_Заполни .env и перезапусти бота._"
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Понятно, больше не показывать", callback_data="setup_warned")
+    ]])
+    await bot.send_message(chat_id=MY_TELEGRAM_ID, text=text, parse_mode="Markdown", reply_markup=keyboard)
+
 async def on_startup(app: Application):
     """Выполняется при старте бота."""
     print("=" * 50)
@@ -40,6 +86,9 @@ async def on_startup(app: Application):
 
     # Создаём папку data если нет
     ensure_data_dir()
+
+    # Проверяем настройки .env
+    await check_setup(app.bot)
 
     # Настраиваем планировщик
     scheduler = setup_scheduler(app.bot, MY_TELEGRAM_ID)

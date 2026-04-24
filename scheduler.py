@@ -3,7 +3,7 @@ import datetime
 import json
 import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from config import UFA_TZ, PARSE_HOURS
+from config import UFA_TZ, PARSE_HOURS, USER_NAME, WEATHER_LAT, WEATHER_LON
 from storage import get_pending_tasks, get_tasks, save_tasks
 
 PENDING_NOTIFICATIONS_FILE = "data/pending_notifications.json"
@@ -28,7 +28,7 @@ def _jarvis_should_read(text: str) -> bool:
     """Определяем стоит ли передавать сообщение Джарвису."""
     skip = [
         "Выбери фильтр", "Выбери период", "Anti-Laziness Bot запущен",
-        "Привет, Ильнур", "Отмечено выполненными", "Задание удалено",
+        "Привет, " + USER_NAME, "Отмечено выполненными", "Задание удалено",
         "Все задания", "Личные задачи", "Показано:", "Выбери задания",
         "Срочные", "Редактировать", "Удалить", "Отмена", "Сохранить",
         "Это домашнее задание", "Пропустить", "Заданий нет",
@@ -399,7 +399,7 @@ async def _get_study_analysis_short() -> str:
         from grok import ask_grok
         raw = await fetch_study_analysis()
         prompt = (
-            f"Данные успеваемости студента Ильнура:\n{raw}\n\n"
+            f"Данные успеваемости студента {USER_NAME}:\n{raw}\n\n"
             f"Напиши короткий анализ — ровно 5-6 предложений. "
             f"Укажи лучший и худший предмет по баллам, "
             f"общую тенденцию и один конкретный совет. "
@@ -1023,7 +1023,7 @@ async def _send_random_motivation(bot, chat_id: int):
             course = _short_course(urgent_task.get("course_name", ""))
             title = urgent_task.get("title", "")
             prompt = (
-                f"Студент Ильнур, самая срочная задача: {course} — {title}, через {min_days} дн. "
+                f"Студент {USER_NAME}, самая срочная задача: {course} — {title}, через {min_days} дн. "
                 f"Напиши одну короткую мотивирующую фразу про эту задачу. "
                 f"Без предисловий, без скобок. Только сама фраза."
             )
@@ -1127,7 +1127,7 @@ async def _fetch_weather() -> str:
     """Погода в Чесноковке — сейчас / днём / вечером через OpenWeatherMap."""
     try:
         import httpx
-        lat, lon = 54.7355, 55.9578
+        lat, lon = WEATHER_LAT, WEATHER_LON
         from config import OPENWEATHER_KEY
         api_key = OPENWEATHER_KEY
 
@@ -1246,7 +1246,7 @@ async def send_morning_briefing(bot, chat_id: int):
         border = "═" * 26
         pad = "   "
         lines = [
-            f"☀️ *Доброе утро, Ильнур!*",
+            f"☀️ *Доброе утро, {USER_NAME}!*",
             f"{day_str}",
             "",
         ]
@@ -1382,7 +1382,7 @@ async def send_midday_briefing(bot, chat_id: int):
         pad = "   "
 
         lines = [
-            f"🌞 *Добрый день, Ильнур!*",
+            f"🌞 *Добрый день, {USER_NAME}!*",
             f"{DAYS[now.weekday()].capitalize()}, {now.day} {MONTHS[now.month-1]}",
             "",
         ]
@@ -1548,7 +1548,7 @@ async def send_evening_briefing(bot, chat_id: int):
         border = "═" * 26
         pad = "   "
         lines = [
-            f"🌙 *Добрый вечер, Ильнур!*",
+            f"🌙 *Добрый вечер, {USER_NAME}!*",
             f"{now.day} {MONTHS[now.month-1]}, {DAYS[now.weekday()]}",
             "",
         ]
@@ -1611,7 +1611,7 @@ async def send_evening_briefing(bot, chat_id: int):
             week_summary = get_stats_summary()
             avg = get_weekly_done_avg()
             prompt = (
-                f"Итог дня студента Ильнура (1 курс ИСиТ):\n"
+                f"Итог дня студента {USER_NAME} (1 курс ИСиТ):\n"
                 f"Пары сегодня: {pairs_str}\n"
                 f"Выполнено задач: {len(done_today)} ({done_str})\n"
                 f"Осталось: {len(pending)}\n"
@@ -1732,7 +1732,7 @@ async def send_daily_results(bot, chat_id: int):
             week_summary = get_stats_summary()
             avg = get_weekly_done_avg()
             prompt = (
-                f"Итог дня студента Ильнура:\n"
+                f"Итог дня студента {USER_NAME}:\n"
                 f"Пары сегодня: {pairs_str}\n"
                 f"Выполнено задач сегодня: {len(done_today)} ({done_str})\n"
                 f"Осталось незакрытых: {len(pending)}\n"
@@ -1763,11 +1763,11 @@ async def send_daily_results(bot, chat_id: int):
                 "сарказм про то что завтра точно напишу чистый код",
             ]
             prompt = (
-                f"Студент Ильнур идёт спать. Прошёл {len(passed)} пар, выполнил {len(done_today)} задач.\n"
+                f"Студент {USER_NAME} идёт спать. Прошёл {len(passed)} пар, выполнил {len(done_today)} задач.\n"
                 f"Напиши смешное пожелание спокойной ночи.\n"
                 f"Ровно 1-2 предложения. После последней точки — ничего. Никаких скобок, пояснений, смайлов в конце. Только русские слова."
             )
-            joke = await ask_grok(prompt, system="Ты пишешь короткие острые фразы. Формат ответа: только сам текст, 1-2 предложения, точка в конце. Никаких скобок, подписей, P.S., пояснений, вариантов. Пример правильного ответа: Ильнур, дедлайн уже греет чайник — вставай и делай.")
+            joke = await ask_grok(prompt, system=f"Ты пишешь короткие острые фразы. Формат ответа: только сам текст, 1-2 предложения, точка в конце. Никаких скобок, подписей, P.S., пояснений, вариантов. Пример правильного ответа: {USER_NAME}, дедлайн уже греет чайник — вставай и делай.")
             if joke:
                 lines.append(f"😴 {_clean_joke(joke)}")
         except Exception as e:
@@ -1944,7 +1944,7 @@ async def send_midday_briefing_no_vk(bot, chat_id: int):
                 "жёсткий юмор про откладывание на потом",
             ]
             prompt = (
-                f"Студент Ильнур, осталось задач: {len(tasks)}. "
+                f"Студент {USER_NAME}, осталось задач: {len(tasks)}. "
                 f"Стиль: {_r.choice(jokes)}. "
                 f"Напиши ОДНУ оригинальную смешную фразу. "
                 f"Можно лёгкий мат. 1-2 предложения. Не начинай с Чувак."
@@ -2055,7 +2055,7 @@ async def send_goodnight(bot, chat_id: int):
             except Exception as e:
                 print(f"Goodnight: ИИ анекдот не сгенерировался: {e}")
 
-        lines = ["😴 *Спокойной ночи, Ильнур!*\n"]
+        lines = [f"😴 *Спокойной ночи, {USER_NAME}!*\n"]
         if anekdot:
             lines.append(f"{'─' * 20}")
             lines.append(f"😄 *Анекдот на ночь:*\n")
@@ -2086,9 +2086,9 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
     scheduler.add_job(send_midday_briefing, trigger="cron", hour=14, minute=0,
                       args=[bot, chat_id], id="midday_14", misfire_grace_time=60)
 
-    # 14:00 теория по предмету
-    scheduler.add_job(send_subject_theory_job, trigger="cron", hour=14, minute=0,
-                      args=[bot, chat_id], id="theory_subject_1400", misfire_grace_time=60)
+    # 11:00 теория по предмету
+    scheduler.add_job(send_subject_theory_job, trigger="cron", hour=11, minute=0,
+                      args=[bot, chat_id], id="theory_subject_1100", misfire_grace_time=60)
 
     # 15:30 английский #2
     scheduler.add_job(send_english_theory_job, trigger="cron", hour=15, minute=30,

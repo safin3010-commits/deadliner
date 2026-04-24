@@ -7,13 +7,13 @@ import os
 import asyncio
 import datetime
 import hashlib
-from config import UFA_TZ
+from config import UFA_TZ, VK_CHAT_URL, VK_PROXY, CHROME_PATH
 
-VK_CHAT_URL = "https://vk.com/im?sel=c22"
+# VK_CHAT_URL берётся из config
 VK_SEEN_FILE = "data/vk_seen.json"
 VK_COOKIES_FILE = "data/vk_cookies.json"
-VK_PROXY = "http://127.0.0.1:10808"
-CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# VK_PROXY берётся из config
+# CHROME_PATH берётся из config
 
 
 def _load_seen() -> dict:
@@ -116,7 +116,7 @@ async def fetch_todays_vk_messages() -> list:
                     async with _httpx.AsyncClient(timeout=10) as _client:
                         await _client.post(
                             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                            json={"chat_id": MY_TELEGRAM_ID, "text": "⚠️ VK: куки протухли — расписание не приходит. Обнови куки командой: cd /Users/ilnursafin/anti_laziness_bot && venv/bin/python3 vk_browser.py --save-cookies"}
+                            json={"chat_id": MY_TELEGRAM_ID, "text": "⚠️ VK: куки протухли — расписание не приходит. Запусти: python3 parsers/vk_browser.py --save-cookies"}
                         )
                 except Exception as _e:
                     print(f"VK: не удалось отправить уведомление: {_e}")

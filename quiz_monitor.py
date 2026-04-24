@@ -33,10 +33,11 @@ def get_safari_url() -> str | None:
 
 
 def get_safari_cookies() -> dict:
-    """Получаем cookies LMS из Chrome."""
+    """Получаем cookies LMS из Chrome (кроссплатформенно)."""
     try:
-        from pycookiecheat import chrome_cookies
-        return chrome_cookies("https://lms.utmn.ru")
+        import browser_cookie3
+        jar = browser_cookie3.chrome(domain_name="lms.utmn.ru")
+        return {c.name: c.value for c in jar}
     except Exception as e:
         print(f"cookies error: {e}")
         return {}

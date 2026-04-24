@@ -5,7 +5,7 @@ from telegram.ext import (
     ContextTypes, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ConversationHandler
 )
-from config import MY_TELEGRAM_ID, UFA_TZ
+from config import MY_TELEGRAM_ID, UFA_TZ, USER_NAME
 from storage import get_tasks, get_pending_tasks, mark_task_done, add_task
 from bot.keyboards import (
     main_menu_keyboard, done_task_keyboard, tasks_filter_keyboard,
@@ -112,7 +112,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
     await update.message.reply_text(
-        "👋 Привет, Ильнур!\n\n"
+        f"👋 Привет, {USER_NAME}!\n\n"
         "Я твой *Anti-Laziness Bot*.\n"
         "Слежу за дедлайнами и не даю лениться 😄\n\n"
         "Используй кнопки меню внизу 👇",
@@ -1163,6 +1163,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("✅ Все напоминания удалены")
 
     # ── Общие ─────────────────────────────────────────────────────────
+    elif data == "setup_warned":
+        from main import _mark_setup_warned
+        _mark_setup_warned()
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.answer("✅ Больше не будем напоминать")
+
     elif data == "cancel":
         context.user_data.pop("_mode", None)
         await query.edit_message_reply_markup(reply_markup=None)
@@ -1298,7 +1304,7 @@ async def analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         raw = await fetch_study_analysis()
 
-        system = """Ты — академический аналитик успеваемости студента Ильнура (1 курс ИСиТ, ТюмГУ+Нетология).
+        system = f"""Ты — академический аналитик успеваемости студента {USER_NAME} (1 курс ИСиТ, ТюмГУ+Нетология).
 Делаешь отчёт для Telegram. Правила:
 - *жирный* для важных цифр и названий
 - Эмодзи для разделения секций
@@ -1356,7 +1362,7 @@ async def analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Вот полный анализ учёбы студента:\n{ai_text}\n\n"
                 f"Сформулируй 2-3 предложения для голосового ассистента Джарвис. "
                 f"Назови самые критичные предметы и главный совет. "
-                f"Говори от третьего лица про студента Ильнура. Без лишних слов."
+                f"Говори от третьего лица про студента {USER_NAME}. Без лишних слов."
             )
             jarvis_text = await ask_grok(jarvis_prompt, system="Ты голосовой ассистент Джарвис. Отвечай кратко, по делу, на русском.")
             if jarvis_text:

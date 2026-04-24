@@ -5,8 +5,9 @@
 import httpx
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL_FAST = "deepseek/deepseek-chat"      # шутки, мотивация, сводки
-MODEL_SMART = "deepseek/deepseek-r1"       # теория, объяснения
+MODEL_FAST = "google/gemini-2.0-flash-exp:free"   # основная бесплатная
+MODEL_FAST_FALLBACK = "qwen/qwen3-8b:free"        # запасная бесплатная
+MODEL_SMART = "google/gemini-2.0-flash-exp:free"  # для теории тоже бесплатная
 
 from config import OPENROUTER_KEYS
 _current_key_idx = 0
@@ -22,9 +23,12 @@ def _build_system_prompt() -> str:
     semester = 1 if now.month >= 9 or now.month == 1 else 2
     # Сессия: 1й семестр — январь, 2й семестр — июнь
     session_month = "январе" if semester == 1 else "июне"
+    from config import USER_NAME, USER_CITY
+    user_name = USER_NAME
+    city_str = f", {USER_CITY}" if USER_CITY else ""
     return (
-        f"Ты — персональный антилень-ассистент студента Ильнура.\n"
-        f"Контекст: 1 курс, {semester} семестр, направление ИСиТ, ТюмГУ совместно с Нетологией, онлайн-обучение, г. Уфа.\n"
+        f"Ты — персональный антилень-ассистент студента {user_name}.\n"
+        f"Контекст: 1 курс, {semester} семестр, направление ИСиТ, ТюмГУ совместно с Нетологией, онлайн-обучение{city_str}.\n"
         f"Сейчас {month_name} {year} года — середина семестра. Сессия будет только в {session_month}. Не упоминай сессию раньше времени.\n"
         f"Твоя задача — мотивировать и помогать не лениться.\n"
         f"Пиши по-русски, неформально, как умный друг. Без воды. Максимум 2-3 коротких предложения.\n"
@@ -86,7 +90,50 @@ async def ask_grok(prompt: str, system: str = None, smart: bool = False) -> str:
             print(f"OpenRouter API error: {e}")
             return ""
 
-    print("OpenRouter: все ключи исчерпаны")
+    print("OpenRouter: все ключи исчерпаны, пробуем Groq...")
+    return await _ask_groq_fallback(prompt, system)
+
+
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL_FAST = "llama-3.3-70b-versatile"
+_groq_key_idx = 0
+
+async def _ask_groq_fallback(prompt: str, system: str) -> str:
+    """Фоллбэк на Groq когда все OpenRouter ключи исчерпаны."""
+    global _groq_key_idx
+    from config import GROQ_KEYS
+    if not GROQ_KEYS:
+        return ""
+    for attempt in range(len(GROQ_KEYS)):
+        key = GROQ_KEYS[_groq_key_idx % len(GROQ_KEYS)]
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.post(
+                    GROQ_URL,
+                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    json={
+                        "model": GROQ_MODEL_FAST,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "max_tokens": 1200,
+                        "temperature": 0.7,
+                    }
+                )
+                if r.status_code in (429, 402, 403):
+                    print(f"Groq: ключ {_groq_key_idx + 1} исчерпан, переключаемся...")
+                    _groq_key_idx = (_groq_key_idx + 1) % len(GROQ_KEYS)
+                    continue
+                r.raise_for_status()
+                content = r.json()["choices"][0]["message"]["content"] or ""
+                print(f"Groq: ответ получен ✅")
+                return content.strip()
+        except Exception as e:
+            print(f"Groq error: {e}")
+            _groq_key_idx = (_groq_key_idx + 1) % len(GROQ_KEYS)
+            continue
+    print("Groq: все ключи исчерпаны")
     return ""
 
 

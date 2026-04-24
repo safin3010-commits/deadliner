@@ -113,9 +113,21 @@ SUBJECT_PRIORITY = [
     ("matan", ["математический анализ", "матанализ", "matan"]),
     ("networks", ["компьютерные сети", "сети"]),
     ("history", ["история", "history"]),
+    ("cpp", ["программирование", "алгоритмизация", "c++", "cpp"]),
 ]
 
-THEORY_SUBJECTS = ["discrete", "matan", "networks", "history"]
+THEORY_SUBJECTS = ["discrete", "matan", "networks", "history", "cpp"]
+
+# Расписание предметов по дням недели (0=пн, 6=вс)
+WEEKDAY_SUBJECT = {
+    0: "matan",      # понедельник
+    1: "networks",   # вторник
+    2: "cpp",        # среда
+    3: "discrete",   # четверг
+    4: "matan",      # пятница
+    5: "networks",   # суббота
+    6: "cpp",        # воскресенье
+}
 
 # Полный список грамматических правил для цикличного обхода
 GRAMMAR_RULES = [
@@ -321,16 +333,65 @@ def _get_subject_key(course_name: str) -> str | None:
 
 
 def _get_todays_priority_subject(schedule: list) -> tuple[str | None, dict | None]:
-    found = {}
+    """Выбираем предмет по дню недели. Тему берём из расписания текущей/ближайшей недели."""
+    today = datetime.datetime.now(tz=UFA_TZ)
+    weekday = today.weekday()
+    subject_key = WEEKDAY_SUBJECT.get(weekday, "matan")
+
+    # Ищем тему в расписании текущей недели
+    lesson = _find_lesson_for_subject(schedule, subject_key)
+
+    # Если не нашли в сегодняшнем расписании — ищем в расписании недели
+    if not lesson:
+        lesson = _find_lesson_in_week(subject_key)
+
+    # Если совсем ничего — создаём заглушку с предметом
+    if not lesson:
+        subject_names = {
+            "matan": "Математический анализ",
+            "networks": "Компьютерные сети",
+            "cpp": "Программирование и алгоритмизация на C++",
+            "discrete": "Дискретная математика",
+            "history": "История России",
+        }
+        lesson = {"course_name": subject_names.get(subject_key, subject_key), "name": ""}
+
+    return subject_key, lesson
+
+
+def _find_lesson_for_subject(schedule: list, subject_key: str) -> dict | None:
+    """Ищем занятие по ключу предмета в списке."""
     for lesson in schedule:
         name = lesson.get("course_name") or lesson.get("name") or ""
         key = _get_subject_key(name)
-        if key and key in THEORY_SUBJECTS and key not in found:
-            found[key] = lesson
-    for pkey, _ in SUBJECT_PRIORITY:
-        if pkey in found:
-            return pkey, found[pkey]
-    return None, None
+        if key == subject_key:
+            return lesson
+    return None
+
+
+def _find_lesson_in_week(subject_key: str) -> dict | None:
+    """Ищем тему в расписании текущей и следующей недели."""
+    try:
+        from parsers.modeus import _load_schedule_cache
+        today = datetime.datetime.now(tz=UFA_TZ).date()
+
+        # Проверяем текущую и следующую неделю
+        for week_offset in range(3):
+            week_start = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(weeks=week_offset)
+            cache = _load_schedule_cache()
+            entry = cache.get(week_start.isoformat())
+            if not entry:
+                continue
+            week_data = entry.get("data", {})
+            for day_lessons in week_data.values():
+                for lesson in day_lessons:
+                    name = lesson.get("course_name") or lesson.get("name") or ""
+                    key = _get_subject_key(name)
+                    if key == subject_key:
+                        return lesson
+    except Exception as e:
+        print(f"study_theory: ошибка поиска темы в неделе: {e}")
+    return None
 
 
 async def get_todays_schedule() -> list:
@@ -353,10 +414,16 @@ async def get_todays_schedule() -> list:
         return []
 
 
-async def _send_long_message(bot, chat_id: int, text: str, parse_mode: str = "Markdown"):
-    limit = 4000
+async def _send_long_message(bot, chat_id: int, text: str, parse_mode: str = None):
+    import html as _html
+    # Убираем двойные звёздочки, оставляем одинарные как есть
+    text = text.replace("**", "*")
+    # Отправляем как <pre> — моноширинный стиль как у английского
+    def _wrap_pre(t):
+        return f"<pre>{_html.escape(t)}</pre>"
+    limit = 3500
     if len(text) <= limit:
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode)
+        await bot.send_message(chat_id=chat_id, text=_wrap_pre(text), parse_mode="HTML")
         return
     parts = []
     current = ""
@@ -371,8 +438,7 @@ async def _send_long_message(bot, chat_id: int, text: str, parse_mode: str = "Ma
         parts.append(current.strip())
     for part in parts:
         if part:
-            await bot.send_message(chat_id=chat_id, text=part, parse_mode=parse_mode)
-
+            await bot.send_message(chat_id=chat_id, text=_wrap_pre(part), parse_mode="HTML")
 
 async def send_subject_theory(bot, chat_id: int):
     try:
@@ -395,23 +461,21 @@ async def send_subject_theory(bot, chat_id: int):
             f"Предмет: {course_name}\n"
             f"Тема занятия: {topic}\n"
             f"{no_repeat + chr(10) if no_repeat else ''}"
-            f"Если тема занятия уже есть в запрещённом списке — возьми смежную подтему, которой там нет.\n"
-            f"\nНапиши подробную теорию для студента 1 курса который ничего не знает. "
-            f"Пиши как живой человек — просто, понятно, без канцелярита. "
-            f"Короткие предложения. Каждая мысль — отдельный абзац.\n\n"
-            f"ВАЖНО — форматирование для Telegram Markdown:\n"
-            f"— Заголовки разделов пиши жирным: *Раздел*\n"
-            f"— Важные термины выделяй жирным: *термин*\n"
-            f"— Примеры выделяй курсивом: _пример_\n"
-            f"— Между разделами пустая строка\n"
-            f"— НЕ используй #, ##, -, * в начале строки как маркеры списков\n\n"
-            f"Структура (каждый раздел подробно, минимум 3-5 предложений):\n"
-            f"*1. Что это такое* — объясни простыми словами, дай аналогию из жизни\n"
-            f"*2. Основные понятия* — каждый термин объясни отдельно с примером\n"
-            f"*3. Как это работает* — пошаговый разбор на конкретном примере\n"
-            f"*4. Типичные ошибки* — что чаще всего путают и как не ошибиться\n"
-            f"*5. Зачем это нужно* — реальное применение в жизни и профессии\n\n"
-            f"Объём: не менее 500 слов. Не жалей деталей — студент должен понять с нуля."
+            f"Если тема уже в запрещённом списке — возьми смежную подтему.\n\n"
+            f"Напиши теорию для студента 1 курса. Просто, понятно, как умный друг.\n\n"
+            f"Структура:\n"
+            f"📌 *ТЕМА — {{topic[:50]}}*\n\n"
+            f"*Что это такое* — 2-3 предложения простыми словами + аналогия из жизни\n\n"
+            f"*Основные понятия* — 2-3 ключевых термина с объяснением\n\n"
+            f"*Как работает* — конкретный пример разбор\n\n"
+            f"*Типичные ошибки* — 2 ошибки которые все делают\n\n"
+            f"*Зачем нужно* — реальное применение\n\n"
+            f"Правила форматирования:\n"
+            f"- *жирный* для заголовков и терминов\n"
+            f"- _курсив_ для примеров\n"
+            f"- НЕ используй ** двойные звёздочки\n"
+            f"- Между разделами пустая строка\n"
+            f"- Объём: строго 250-300 слов. Умещайся в одно сообщение Telegram."
         )
         theory = await ask_grok(
             prompt,
@@ -423,35 +487,13 @@ async def send_subject_theory(bot, chat_id: int):
         _add_to_history(seen, f"{course_name[:20]}:{topic[:30]}")
         _save_seen(seen)
 
-        # Случайный факт с uselessfacts
-        fact_block = ""
-        try:
-            import httpx as _httpx
-            from grok import ask_grok as _ask_grok
-            async with _httpx.AsyncClient(timeout=8) as _client:
-                _r = await _client.get(
-                    "https://uselessfacts.jsph.pl/api/v2/facts/random",
-                    params={"language": "en"}
-                )
-                if _r.status_code == 200:
-                    _fact_en = _r.json().get("text", "")
-                    if _fact_en:
-                        _fact_ru = await _ask_grok(
-                            f"Переведи факт на русский. Только перевод:\n{_fact_en}"
-                        )
-                        if _fact_ru:
-                            fact_block = f"\n{'─' * 20}\n💡 ФАКТ ДНЯ\n────────────────────\n{_fact_ru}"
-        except Exception as e:
-            print(f"Fact of day error: {e}")
-
         SUBJECT_EMOJI = {"discrete": "🔢", "matan": "📐", "networks": "🌐", "history": "📜"}
         emoji = SUBJECT_EMOJI.get(subject_key, "📚")
-        header = (
-            f"{emoji} *ТЕОРИЯ ДНЯ — {course_name[:40].upper()}*\n"
-            f"────────────────────────────────────────\n"
-            f"Тема: {topic[:60]}\n\n"
-        )
-        await _send_long_message(bot, chat_id, header + theory + fact_block)
+        header = f"{emoji} *ТЕОРИЯ ДНЯ — {course_name[:40].upper()}*\n\n"
+        # Заменяем двойные звёздочки на одинарные
+        import re as _re
+        theory = _re.sub(r'\*\*(.+?)\*\*', r'*\1*', theory)
+        await _send_long_message(bot, chat_id, header + theory)
         print(f"study_theory: теория по {subject_key} отправлена")
     except Exception as e:
         print(f"study_theory subject error: {e}")
