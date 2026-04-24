@@ -1858,20 +1858,21 @@ async def check_vk_and_notify(bot, chat_id: int):
                 if not formatted:
                     formatted = vk_text
 
-                full_text = "💬 *ВКонтакте*\n💬 *Новое сообщение*\n" + "─" * 20 + "\n" + formatted
+                header = "<b>💬 ВКонтакте — Новое сообщение</b>\n" + "─" * 20
+                full_text = f"{header}\n\n{formatted}"
                 if len(full_text) > 4000:
                     full_text = full_text[:4000]
 
-                # Отправляем с отключённым превью ссылок
+                # Отправляем в HTML
                 try:
                     await bot.send_message(
                         chat_id=chat_id,
                         text=full_text,
-                        parse_mode="Markdown",
+                        parse_mode="HTML",
                         disable_web_page_preview=True
                     )
                 except Exception:
-                    # Если Markdown не прошёл — отправляем без форматирования
+                    # Если HTML не прошёл — отправляем без форматирования
                     await bot.send_message(
                         chat_id=chat_id,
                         text=full_text,

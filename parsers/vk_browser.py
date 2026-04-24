@@ -64,12 +64,33 @@ def _decode_vk_links(text: str) -> str:
 
 
 async def _format_with_ai(text: str) -> str:
-    """Возвращаем текст как есть — без AI форматирования."""
-    text = _decode_vk_links(text)
-    # Заменяем двойные звёздочки на одинарные для Telegram Markdown
+    """Форматируем сообщение из ВК через AI."""
+    try:
+        from grok import ask_grok
+        system = """Ты форматировщик расписания для Telegram.
+Правила:
+1. Убери полностью: название группы, приветствие, легенду дисциплин (строки с обязательны для всех, обязательны по группам, LXP/LMS, Расписание вы можете), строки вида Сообщество закрепило, мусорные строки с vk.com в конце.
+2. Оставь только блоки с датой (📌) и строки с парами.
+3. Дату выдели жирным: <b>📌 24 апреля, пятница:</b>
+4. Название предмета в каждой паре выдели жирным. Паттерн: время — <b>Название</b>. Остальное.
+5. Ссылки на пары (my.mts-link.ru и подобные) оставь как есть.
+6. Пустые строки между парами оставь.
+7. Отвечай ТОЛЬКО отформатированным текстом в HTML для Telegram. Никаких пояснений."""
+        result = await ask_grok(text, system=system)
+        if result:
+            return result
+    except Exception as e:
+        print(f"VK format AI error: {e}")
+    # Фоллбэк — возвращаем текст как есть без мусора
     import re
-    text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
-    return text
+    lines = text.strip().split('\n')
+    while lines:
+        last = lines[-1].strip()
+        if (re.match(r'^\d{1,2}:\d{2}', last) and 'vk.com' in last) or re.match(r'^https?://vk\.com', last):
+            lines.pop()
+        else:
+            break
+    return '\n'.join(lines).strip()
 
 
 async def fetch_todays_vk_messages() -> list:

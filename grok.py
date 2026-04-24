@@ -5,9 +5,9 @@
 import httpx
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL_FAST = "google/gemini-2.0-flash-exp:free"   # основная бесплатная
-MODEL_FAST_FALLBACK = "qwen/qwen3-8b:free"        # запасная бесплатная
-MODEL_SMART = "google/gemini-2.0-flash-exp:free"  # для теории тоже бесплатная
+MODEL_FAST = "openrouter/auto"   # автовыбор лучшей доступной модели
+MODEL_FAST_FALLBACK = "openrouter/auto"        # запасная бесплатная
+MODEL_SMART = "openrouter/auto"  # для теории и сложных задач
 
 from config import OPENROUTER_KEYS
 _current_key_idx = 0
@@ -40,11 +40,16 @@ SYSTEM_PROMPT = _build_system_prompt()
 
 
 async def ask_grok(prompt: str, system: str = None, smart: bool = False) -> str:
+    """Сначала пробуем Groq (быстро), потом OpenRouter как фоллбэк."""
     if system is None:
         system = _build_system_prompt()
-    """Отправляем запрос в OpenRouter. При ошибке переключаемся на следующий ключ.
-    smart=True — используем DeepSeek R1 для теории и сложных объяснений.
-    """
+
+    # Сначала Groq
+    result = await _ask_groq_fallback(prompt, system)
+    if result:
+        return result
+
+    # Фоллбэк — OpenRouter
     global _current_key_idx
     model = MODEL_SMART if smart else MODEL_FAST
     max_tokens = 4000 if smart else 1200
@@ -78,7 +83,6 @@ async def ask_grok(prompt: str, system: str = None, smart: bool = False) -> str:
 
                 r.raise_for_status()
                 data = r.json()
-                # R1 может вернуть reasoning отдельно — берём только content
                 content = data["choices"][0]["message"]["content"] or ""
                 return content.strip()
 
@@ -88,10 +92,9 @@ async def ask_grok(prompt: str, system: str = None, smart: bool = False) -> str:
                 _current_key_idx = (_current_key_idx + 1) % len(OPENROUTER_KEYS)
                 continue
             print(f"OpenRouter API error: {e}")
-            return ""
 
-    print("OpenRouter: все ключи исчерпаны, пробуем Groq...")
-    return await _ask_groq_fallback(prompt, system)
+    print("Все AI исчерпаны")
+    return ""
 
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
