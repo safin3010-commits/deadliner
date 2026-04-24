@@ -451,6 +451,7 @@ def new_email_message(email_data: dict) -> str:
     body = _esc(email_data.get("body", "")[:600])
 
     return (
+        f"📧 <b>Яндекс Почта</b>\n"
         f"📧 <b>Новое письмо</b>\n"
         f"{'─' * 20}\n"
         f"👤 <b>{sender}</b>\n"
