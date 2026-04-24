@@ -81,7 +81,7 @@ async def check_setup(bot):
 async def on_startup(app: Application):
     """Выполняется при старте бота."""
     print("=" * 50)
-    print("Anti-Laziness Bot запускается...")
+    print("ДедЛайнер запускается...")
     print("=" * 50)
 
     # Создаём папку data если нет
@@ -102,7 +102,7 @@ async def on_startup(app: Application):
         await app.bot.send_message(
             chat_id=MY_TELEGRAM_ID,
             text=(
-                "✅ *Anti-Laziness Bot запущен!*\n\n"
+                "✅ *ДедЛайнер запущен!*\n\n"
                 "Я буду следить за твоими дедлайнами.\n"
                 "Напиши /help чтобы узнать команды."
             ),

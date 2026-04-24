@@ -2,7 +2,7 @@
 cd "$(dirname "$0")"
 
 # Убиваем старый процесс по PID файлу
-PID_FILE="/tmp/anti_laziness_bot.pid"
+PID_FILE="/tmp/deadliner.pid"
 if [ -f "$PID_FILE" ]; then
     OLD_PID=$(cat "$PID_FILE")
     if kill -0 "$OLD_PID" 2>/dev/null; then

@@ -2,10 +2,10 @@
 cd /d "%~dp0"
 
 :: Убиваем старый процесс
-if exist "%TEMP%\anti_laziness_bot.pid" (
-    set /p OLD_PID=<"%TEMP%\anti_laziness_bot.pid"
+if exist "%TEMP%\deadliner.pid" (
+    set /p OLD_PID=<"%TEMP%\deadliner.pid"
     taskkill /PID %OLD_PID% /F >nul 2>&1
-    del "%TEMP%\anti_laziness_bot.pid"
+    del "%TEMP%\deadliner.pid"
 )
 echo Старые процессы убиты
 
