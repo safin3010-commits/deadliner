@@ -1,5 +1,5 @@
 """
-Клиент OpenRouter (DeepSeek) для Anti-Laziness Bot.
+Клиент OpenRouter для ДедЛайнер.
 """
 
 import httpx
@@ -235,5 +235,5 @@ async def beautify_message(sender: str, content: str, source: str = "letter") ->
     if not content or len(content) < 20:
         return content
     prompt = f"Отправитель: {sender}\nТекст: {content[:800]}\nУбери лишнее, сохрани смысл. Максимум 300 символов. Только текст."
-    result = await ask_grok(prompt, system="Ты редактор текста. Отвечай только отредактированным текстом.")
+    result = await ask_grok(prompt, system="Ты редактор текста. Отвечай только отредактированным текстом. Никакого Markdown, никаких звёздочек, никаких символов форматирования.")
     return result if result else content

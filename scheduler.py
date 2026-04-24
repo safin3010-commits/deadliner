@@ -27,7 +27,7 @@ async def _retry(coro_fn, attempts=3, delay=5):
 def _jarvis_should_read(text: str) -> bool:
     """Определяем стоит ли передавать сообщение Джарвису."""
     skip = [
-        "Выбери фильтр", "Выбери период", "Anti-Laziness Bot запущен",
+        "Выбери фильтр", "Выбери период", "ДедЛайнер запущен",
         "Привет, " + USER_NAME, "Отмечено выполненными", "Задание удалено",
         "Все задания", "Личные задачи", "Показано:", "Выбери задания",
         "Срочные", "Редактировать", "Удалить", "Отмена", "Сохранить",
@@ -698,7 +698,7 @@ async def check_mail_and_notify(bot, chat_id: int):
                 pass
             # Помечаем сразу — чтобы не дублировать даже в тихие часы
             add_seen_message(email_data["id"])
-            text = "<b>📧 Яндекс Почта</b>\n\n" + new_email_message(email_data)
+            text = new_email_message(email_data)
             keyboard = task_from_message_keyboard(email_data["id"])
             await send_with_retry(bot, chat_id, text, parse_mode="HTML", reply_markup=keyboard)
 
@@ -723,7 +723,7 @@ async def check_messenger_and_notify(bot, chat_id: int):
                 pass
             # Помечаем сразу — чтобы не дублировать даже в тихие часы
             add_seen_message(msg["id"])
-            text = "<b>💬 Яндекс Мессенджер</b>\n\n" + new_messenger_message(msg)
+            text = new_messenger_message(msg)
             keyboard = task_from_message_keyboard(msg["id"])
             await send_with_retry(bot, chat_id, text, parse_mode="HTML", reply_markup=keyboard)
 
@@ -2067,6 +2067,120 @@ async def send_goodnight(bot, chat_id: int):
         print(f"Scheduler goodnight error: {e}")
 
 
+
+# ─── Цитата дня 13:00 ────────────────────────────────────────────────
+
+def _get_quote() -> str:
+    """Берём случайную цитату из файла, каждая появляется раз за полный цикл."""
+    import json, os, random
+    quotes_file = "data/quotes.json"
+    state_file = "data/quotes_state.json"
+    try:
+        with open(quotes_file, encoding="utf-8") as f:
+            all_quotes = json.load(f)
+    except Exception:
+        return "Успех — это сумма небольших усилий, повторяемых день за днём."
+    # Загружаем состояние
+    try:
+        with open(state_file) as f:
+            state = json.load(f)
+    except Exception:
+        state = {"remaining": []}
+    remaining = state.get("remaining", [])
+    # Если очередь пуста — перезаполняем и перемешиваем
+    if not remaining:
+        remaining = list(range(len(all_quotes)))
+        random.shuffle(remaining)
+    idx = remaining.pop(0)
+    # Сохраняем состояние
+    os.makedirs("data", exist_ok=True)
+    with open(state_file, "w") as f:
+        json.dump({"remaining": remaining}, f)
+    return all_quotes[idx]
+
+
+async def send_quote(bot, chat_id: int):
+    """13:00 — мотивационная цитата дня."""
+    import datetime as _dt
+    today = _dt.datetime.now(tz=UFA_TZ).date().isoformat()
+    state_file = "data/quote_sent.json"
+    try:
+        with open(state_file) as f:
+            if json.load(f).get("date") == today:
+                print("Scheduler: цитата уже была сегодня")
+                return
+    except Exception:
+        pass
+    try:
+        quote = _get_quote()
+        msg = f"💬 *Цитата дня*\n\n_{quote}_"
+        await send_with_retry(bot, chat_id, msg, parse_mode="Markdown")
+        os.makedirs("data", exist_ok=True)
+        with open(state_file, "w") as f:
+            json.dump({"date": today}, f)
+        print("Scheduler: цитата дня отправлена")
+    except Exception as e:
+        print(f"Scheduler quote error: {e}")
+
+
+# ─── Напоминалка 17:00 ───────────────────────────────────────────────
+
+_REMINDERS_17 = [
+    "🔥 Эй, ещё не вечер! Закрой хотя бы одну задачу до брифинга.",
+    "⏰ 17:00 — самое время сделать то, что откладывал с утра.",
+    "📚 Через 4 часа вечерний брифинг. Есть что отметить выполненным?",
+    "🎯 Одна задача сейчас = спокойный вечер. Давай.",
+    "⚡️ Рабочее время ещё идёт. Не трать его на мемы.",
+    "📌 Напоминаю: дедлайны сами себя не выполнят.",
+    "🚀 До конца дня 4 часа. Используй хотя бы один.",
+    "😤 Ты ещё не сделал то что планировал утром. Пора.",
+    "💡 Сейчас самый продуктивный момент дня. Не пропусти.",
+    "🏃 Финишная прямая дня — осталось немного. Закрой одну задачу.",
+    "😴 Не засыпай! До вечера ещё куча времени.",
+    "🎓 Будущий ты скажет спасибо если сделаешь это сейчас.",
+    "📝 5 минут чтобы начать. Начни.",
+    "🤔 Что важнее — очередной ролик или закрытый дедлайн?",
+    "🏆 Чемпионы не ждут вдохновения. Они просто делают.",
+    "📅 Завтра будет легче если сделать сегодня.",
+    "🔔 Дедлайн не спит. А ты?",
+    "💪 Одно задание. Прямо сейчас. Го.",
+    "🎯 Фокус! Телефон в сторону, задача перед тобой.",
+    "⏳ Время идёт в любом случае. Пусть идёт с пользой.",
+    "🧠 Мозг разогрет с утра. Используй пока не остыл.",
+    "😎 Сделай сейчас — вечером будешь собой гордиться.",
+    "🚨 Внимание: обнаружены незакрытые задачи. Требуется вмешательство.",
+    "📖 Открой задание. Просто открой. Дальше само пойдёт.",
+    "🌅 День ещё не закончился. Сделай его продуктивным.",
+    "💥 Взрыв продуктивности через 3... 2... 1... Давай!",
+    "🤖 ДедЛайнер напоминает: ты ещё не сделал домашку.",
+    "🎪 Шоу называется \"Я точно сделаю это потом\". Занавес пора закрывать.",
+    "😏 Дедлайн смотрит на тебя. Что скажешь?",
+    "⚡️ Зарядка кончается? Нет — это продуктивность. Подзарядись делом.",
+]
+
+async def send_evening_reminder(bot, chat_id: int):
+    """17:00 — случайная напоминалка."""
+    import datetime as _dt
+    today = _dt.datetime.now(tz=UFA_TZ).date().isoformat()
+    state_file = "data/reminder17_sent.json"
+    try:
+        with open(state_file) as f:
+            if json.load(f).get("date") == today:
+                print("Scheduler: напоминалка 17:00 уже была сегодня")
+                return
+    except Exception:
+        pass
+    try:
+        import random
+        msg = random.choice(_REMINDERS_17)
+        await send_with_retry(bot, chat_id, msg)
+        os.makedirs("data", exist_ok=True)
+        with open(state_file, "w") as f:
+            json.dump({"date": today}, f)
+        print("Scheduler: напоминалка 17:00 отправлена")
+    except Exception as e:
+        print(f"Scheduler reminder 17 error: {e}")
+
 def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(
         timezone=UFA_TZ,
@@ -2102,9 +2216,14 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
     scheduler.add_job(send_english_theory_job, trigger="cron", hour=21, minute=30,
                       args=[bot, chat_id], id="theory_english_2130", misfire_grace_time=60)
 
-    # 23:00 спокойной ночи + анекдот
-    scheduler.add_job(send_goodnight, trigger="cron", hour=23, minute=0,
-                      args=[bot, chat_id], id="goodnight_23", misfire_grace_time=60)
+
+    # 13:00 цитата дня
+    scheduler.add_job(send_quote, trigger="cron", hour=13, minute=0,
+                      args=[bot, chat_id], id="quote_13", misfire_grace_time=3600)
+
+    # 17:00 напоминалка
+    scheduler.add_job(send_evening_reminder, trigger="cron", hour=17, minute=0,
+                      args=[bot, chat_id], id="reminder_17", misfire_grace_time=3600)
 
     # ── Воскресенье 20:00 недельный отчёт ──
     scheduler.add_job(send_weekly_report, trigger="cron", day_of_week="sun", hour=20, minute=0,

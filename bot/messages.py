@@ -469,7 +469,6 @@ def new_messenger_message(msg_data: dict) -> str:
     content = _esc(content[:600])
 
     return (
-        f"💬 <b>Яндекс Мессенджер</b>\n"
         f"💬 <b>Новое сообщение</b>\n"
         f"{'─' * 20}\n"
         f"👤 <b>{sender}</b>\n"
@@ -580,7 +579,7 @@ def format_subject_grades(data: dict) -> str:
         att = lesson.get("attendance", "")
         scores = lesson.get("scores", [])
 
-        att_icon = {"PRESENT": "✅", "ABSENT": "❌", "LATE": "⏰"}.get(att, "")
+        att_icon = {"PRESENT": "✅", "ABSENT": "❌", "LATE": "⏰"}.get(att, "⬜️")
         score_str = ""
         if scores:
             score_str = "  🎯 " + ", ".join(
@@ -596,6 +595,8 @@ def format_subject_grades(data: dict) -> str:
             line += f" {name_short}"
         if score_str:
             line += score_str
+        elif not att:
+            line += " _не выставлено_"
         lines.append(line)
 
     lines.append("")

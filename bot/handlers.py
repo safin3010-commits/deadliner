@@ -113,7 +113,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         f"👋 Привет, {USER_NAME}!\n\n"
-        "Я твой *Anti-Laziness Bot*.\n"
+        "Я твой *ДедЛайнер*.\n"
         "Слежу за дедлайнами и не даю лениться 😄\n\n"
         "Используй кнопки меню внизу 👇",
         parse_mode="Markdown",
@@ -1251,10 +1251,27 @@ async def grades_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Запускает мониторинг тестов LMS в фоне."""
+    """Запускает мониторинг тестов LMS в фоне. На Windows/Linux принимает URL аргументом."""
     if not is_authorized(update.effective_user.id):
         return
     import subprocess, sys, os
+
+    # Если передан URL — сразу парсим без мониторинга (для Windows/Linux)
+    args = context.args
+    if args and args[0].startswith("http"):
+        from quiz_monitor import process_quiz
+        await update.message.reply_text("⏳ Парсю тест...")
+        await process_quiz(args[0])
+        return
+
+    # macOS — автомониторинг Chrome
+    if sys.platform != "darwin":
+        await update.message.reply_text(
+            "ℹ️ На Windows/Linux передай URL теста напрямую:\n"
+            "`/quiz https://lms.utmn.ru/mod/quiz/attempt.php?attempt=...`",
+            parse_mode="Markdown"
+        )
+        return
 
     # Проверяем не запущен ли уже
     result = subprocess.run(["pgrep", "-f", "quiz_monitor.py"], capture_output=True, text=True)
@@ -1284,8 +1301,12 @@ async def quizstop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Останавливает мониторинг тестов."""
     if not is_authorized(update.effective_user.id):
         return
-    import subprocess
-    result = subprocess.run(["pkill", "-f", "quiz_monitor.py"], capture_output=True)
+    import subprocess, sys
+    if sys.platform == "darwin":
+        result = subprocess.run(["pkill", "-f", "quiz_monitor.py"], capture_output=True)
+    else:
+        result = subprocess.run(["taskkill", "/F", "/FI", "WINDOWTITLE eq quiz_monitor*"],
+                                capture_output=True, shell=True)
     if result.returncode == 0:
         await update.message.reply_text("⏹ Мониторинг остановлен")
     else:

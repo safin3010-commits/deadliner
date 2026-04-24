@@ -530,7 +530,16 @@ async def fetch_grades_for_subject(cur_id: str) -> dict | None:
                             "type": obj.get("typeName", ""),
                             "value": obj["result"].get("resultValue", ""),
                         })
-                if att or scores:
+                # Показываем все прошедшие встречи, даже без оценок
+                lesson_date_str = lesson.get("eventStartsAtLocal", "")
+                is_past = False
+                if lesson_date_str:
+                    try:
+                        lesson_date = datetime.datetime.fromisoformat(lesson_date_str).date()
+                        is_past = lesson_date <= datetime.datetime.now(tz=UFA_TZ).date()
+                    except Exception:
+                        pass
+                if is_past:
                     lessons_data.append({
                         "name": lesson.get("name", ""),
                         "date": lesson.get("eventStartsAtLocal", ""),

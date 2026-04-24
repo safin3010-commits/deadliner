@@ -9,10 +9,10 @@ import asyncio
 import re
 import subprocess
 import httpx
-from config import MY_TELEGRAM_ID, TELEGRAM_TOKEN
+from config import MY_TELEGRAM_ID, TELEGRAM_TOKEN, VK_PROXY
 
 LMS_BASE_URL = "https://lms.utmn.ru"
-PROXY = "http://127.0.0.1:10808"
+PROXY = VK_PROXY or ""
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
 }
@@ -22,11 +22,31 @@ _sent_attempts: set = set()
 
 def get_safari_url() -> str | None:
     try:
-        result = subprocess.run(
-            ["osascript", "-e", 'tell application "Google Chrome" to return URL of active tab of front window'],
-            capture_output=True, text=True, timeout=3
-        )
-        url = result.stdout.strip()
+        import sys
+        if sys.platform == "darwin":
+            # macOS — через osascript
+            result = subprocess.run(
+                ["osascript", "-e", 'tell application "Google Chrome" to return URL of active tab of front window'],
+                capture_output=True, text=True, timeout=3
+            )
+            url = result.stdout.strip()
+        elif sys.platform == "win32":
+            # Windows — через PowerShell
+            result = subprocess.run(
+                ["powershell", "-command",
+                 "(Get-Process chrome | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object -First 1).MainWindowTitle"],
+                capture_output=True, text=True, timeout=3
+            )
+            # На Windows получаем заголовок окна, не URL — используем pygetwindow как fallback
+            # Простейший вариант: читаем из буфера обмена если пользователь скопировал URL
+            url = ""
+        else:
+            # Linux — через xdotool
+            result = subprocess.run(
+                ["xdotool", "getactivewindow", "getwindowname"],
+                capture_output=True, text=True, timeout=3
+            )
+            url = ""
         return url if url and url.startswith("http") else None
     except Exception:
         return None

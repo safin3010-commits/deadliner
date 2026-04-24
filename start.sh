@@ -14,6 +14,9 @@ if [ -f "$PID_FILE" ]; then
 fi
 echo "Старые процессы убиты"
 
+# Убиваем все оставшиеся экземпляры на всякий случай
+pkill -f "main\.py" 2>/dev/null; sleep 1
+
 # Запускаем
 venv/bin/python3 main.py >> bot.log 2>&1 &
 PID=$!

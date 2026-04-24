@@ -1,6 +1,6 @@
 """
 Запускать ОТДЕЛЬНО от бота, один раз:
-    cd ~/anti_laziness_bot && source venv/bin/activate && python3 login_messenger.py
+    cd ~/deadliner && source venv/bin/activate && python3 login_messenger.py
 """
 
 import asyncio

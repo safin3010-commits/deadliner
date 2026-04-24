@@ -1,7 +1,7 @@
 import os, sys
 
 # ── Один экземпляр ──
-_PID_FILE = "/tmp/anti_laziness_bot.pid"
+_PID_FILE = "/tmp/deadliner.pid"
 if os.path.exists(_PID_FILE):
     try:
         _old_pid = int(open(_PID_FILE).read().strip())

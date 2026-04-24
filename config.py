@@ -25,7 +25,7 @@ YANDEX_MAIL = os.getenv("YANDEX_MAIL")
 YANDEX_APP_PASSWORD = os.getenv("YANDEX_APP_PASSWORD")
 
 # Timezone
-UFA_TZ = ZoneInfo("Asia/Yekaterinburg")
+UFA_TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Yekaterinburg"))
 
 # Parsing schedule (Ufa time)
 PARSE_HOURS = [9, 14, 21]
