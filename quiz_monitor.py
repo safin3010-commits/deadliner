@@ -131,7 +131,7 @@ async def fetch_page_with_safari_cookies(url: str) -> str | None:
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=HEADERS, cookies=cookies, proxy=PROXY) as client:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=HEADERS, cookies=cookies, **({"proxy": PROXY} if PROXY else {})) as client:
             r = await client.get(url)
             if "login" in str(r.url).lower():
                 return None
@@ -144,7 +144,7 @@ async def fetch_page_with_safari_cookies(url: str) -> str | None:
 async def fetch_next_page(attempt_id: str, cmid: str, from_page: int, sesskey: str, slots: str, cookies: dict) -> str | None:
     """POST на processattempt с cookies Safari."""
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=HEADERS, cookies=cookies, proxy=PROXY) as client:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=HEADERS, cookies=cookies, **({"proxy": PROXY} if PROXY else {})) as client:
             r = await client.post(
                 f"{LMS_BASE_URL}/mod/quiz/processattempt.php?cmid={cmid}",
                 data={
