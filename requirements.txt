@@ -1,4 +1,4 @@
-anyio==4.12.1
+anyio>=4.13.0
 APScheduler==3.11.2
 beautifulsoup4==4.14.3
 certifi==2026.2.25

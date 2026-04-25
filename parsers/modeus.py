@@ -71,6 +71,9 @@ def _try_auth_sync() -> str | None:
 
     s = requests.Session()
     s.headers.update(HEADERS)
+    s.verify = False
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     r = s.get(MODEUS_CONFIG_URL, timeout=30)
     config = r.json()
@@ -85,7 +88,23 @@ def _try_auth_sync() -> str | None:
         "nonce": token_hex(16),
         "state": token_hex(16),
     }
-    r = s.get(auth_url, params=params, timeout=30, allow_redirects=True)
+    # Обходим fs.utmn.ru который зависает — делаем редиректы вручную
+    r = s.get(auth_url, params=params, timeout=10, allow_redirects=False)
+    for _ in range(10):
+        if r.status_code not in (301, 302, 303, 307, 308):
+            break
+        next_url = r.headers.get("Location", "")
+        if not next_url:
+            break
+        if "fs.utmn.ru" in next_url:
+            # fs.utmn.ru зависает — пропускаем через прямой запрос с коротким таймаутом
+            try:
+                r = s.get(next_url, timeout=5, allow_redirects=False)
+            except Exception:
+                # Если завис — пробуем следующий редирект через auth.modeus.org
+                break
+        else:
+            r = s.get(next_url, timeout=10, allow_redirects=False)
     if r.status_code == 403:
         return None
 
