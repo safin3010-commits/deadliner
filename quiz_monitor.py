@@ -250,7 +250,7 @@ async def monitor():
     print("   Открывай тесты в Safari — вопросы придут в Telegram")
     print("   Ctrl+C для остановки\n")
 
-    await send_tg("🔍 *Мониторинг тестов запущен*\nОткрывай тест в Safari — вопросы пришлю сюда")
+    # Сообщение отправляется из handlers.py
 
     last_url = None
     try:
