@@ -131,14 +131,8 @@ def mark_lms_tasks_done(completed_ids: set, parser_tasks: list = None) -> int:
             print(f"LMS done by ID: {task.get('title','')[:40]}")
             continue
 
-        # Способ 2: совпадение названия+курс с выполненным (разные ID одного задания)
-        # Если задача НЕ в новом списке парсера — парсер её отфильтровал как выполненную
-        if parser_tasks is not None and name_pair not in parser_name_course:
-            task["done"] = True
-            task["done_at"] = now
-            count += 1
-            print(f"LMS done by absence: {task.get('title','')[:40]}")
-            continue
+        # Способ 2 отключён — парсер фильтрует по дедлайну, задачи без дедлайна
+        # ошибочно помечались выполненными
 
     if count:
         save_tasks(tasks)

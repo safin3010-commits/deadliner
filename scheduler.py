@@ -338,7 +338,7 @@ async def _fetch_schedule_fresh_or_cache() -> list:
 
 # ─── Синхронизация задач ─────────────────────────────────────────────
 
-async def sync_all_tasks():
+async def sync_all_tasks(bot=None, chat_id=None):
     """Синхронизируем LMS и Нетологию."""
     try:
         from parsers.lms import fetch_lms_deadlines
@@ -377,9 +377,19 @@ async def sync_all_tasks():
         existing_tasks = get_tasks()
         existing_ids = {t.get("id") for t in existing_tasks}
 
+        import os as _os
+        notified_file = "data/notified_tasks.json"
+        try:
+            notified = json.load(open(notified_file)) if _os.path.exists(notified_file) else []
+        except Exception:
+            notified = []
+        notified_changed = False
+
         updated = 0
         for t in (lms_tasks or []) + (netology_tasks or []):
             task_id = t.get("id")
+            notif_key = str(task_id) if task_id else f"{t.get('title','')}_{t.get('course_name','')}"
+
             # Если задача уже есть — обновляем дедлайн если изменился
             found = False
             for existing in existing_tasks:
@@ -397,6 +407,40 @@ async def sync_all_tasks():
                     existing_tasks.append(t)
                     existing_ids.add(task_id)
                     added += 1
+
+            # Уведомление — отдельно от добавления, по notified_key
+            if bot and chat_id and t.get("source") in ("lms", "netology"):
+                if notif_key not in notified:
+                    notified.append(notif_key)
+                    notified_changed = True
+                    source_name = "LMS" if t.get("source") == "lms" else "Нетология"
+                    title = t.get("title", "Без названия")
+                    course = t.get("course_name", "")
+                    deadline = t.get("deadline", "")
+                    deadline_str = ""
+                    if deadline:
+                        try:
+                            dt = datetime.datetime.fromisoformat(deadline).astimezone(UFA_TZ)
+                            deadline_str = f"\n📅 Дедлайн: {dt.strftime('%d.%m.%Y %H:%M')}"
+                        except Exception:
+                            pass
+                    text = (
+                        f"💬 *{source_name}*\n"
+                        "\n"
+                        "💬 Новая задача\n"
+                        "────────────────────\n"
+                        f"📌 {title}\n"
+                        f"📚 {course}"
+                        f"{deadline_str}"
+                    )
+                    try:
+                        await bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+                    except Exception as ex:
+                        print(f"sync_all_tasks: не удалось отправить уведомление: {ex}")
+
+        if notified_changed:
+            with open(notified_file, "w") as _f:
+                json.dump(notified[-500:], _f, ensure_ascii=False)
 
         if updated:
             print(f"Scheduler: обновлено дедлайнов: {updated}")
@@ -1250,7 +1294,6 @@ async def send_morning_briefing(bot, chat_id: int):
         return
     try:
         print("Scheduler: утренний брифинг 9:00...")
-        _mark_morning_sent()
         await sync_all_tasks()
         from grok import ask_grok
         from bot.messages import _expand_and_sort, _lesson_emoji, _s, _short_course
@@ -1383,10 +1426,14 @@ async def send_morning_briefing(bot, chat_id: int):
             print(f"Morning study analysis error: {e}")
 
         await send_with_retry(bot, chat_id, "\n".join(lines))
+        _mark_morning_sent()
     except Exception as e:
         print(f"Scheduler morning briefing error: {e}")
 async def send_midday_briefing(bot, chat_id: int):
     """14:00 — дневная сводка."""
+    if _is_midday_sent():
+        print("Scheduler: дневной брифинг уже был сегодня — пропускаем")
+        return
     try:
         print("Scheduler: дневной брифинг 14:00...")
         await sync_all_tasks()
@@ -1488,6 +1535,7 @@ async def send_midday_briefing(bot, chat_id: int):
             print(f"Forismatic midday error: {e}")
 
         await send_with_retry(bot, chat_id, "\n".join(lines))
+        _mark_midday_sent()
 
     except Exception as e:
         print(f"Scheduler midday briefing error: {e}")
@@ -1500,7 +1548,6 @@ async def send_evening_briefing(bot, chat_id: int):
     if _is_evening_sent():
         print("Scheduler: вечерний брифинг уже был сегодня — пропускаем")
         return
-    _mark_evening_sent()
     try:
         print("Scheduler: вечерний брифинг 21:00...")
         await sync_all_tasks()
@@ -1675,6 +1722,7 @@ async def send_evening_briefing(bot, chat_id: int):
             print(f"Evening IT news error: {e}")
 
         await send_with_retry(bot, chat_id, "\n".join(lines))
+        _mark_evening_sent()
     except Exception as e:
         print(f"Scheduler evening briefing error: {e}")
 
@@ -1854,16 +1902,8 @@ async def check_vk_and_notify(bot, chat_id: int):
     try:
         from parsers.vk_browser import fetch_todays_vk_messages, _mark_hash_seen, _format_with_ai, _load_seen, _save_seen
 
-        # Сброс seen_hashes в полночь — чтобы новый день начинался чисто
-        now = datetime.datetime.now(tz=UFA_TZ)
-        seen = _load_seen()
-        last_reset = seen.get("last_reset_date", "")
-        today_str = now.date().isoformat()
-        if last_reset != today_str:
-            seen["seen_hashes"] = []
-            seen["last_reset_date"] = today_str
-            _save_seen(seen)
-            print("VK: seen_hashes сброшены для нового дня")
+        # Хеши храним 3 дня — защита от дублей после перезапуска
+        # Сброс не делаем, просто ограничиваем размер в _mark_hash_seen
 
         messages = await fetch_todays_vk_messages()
         if not messages:
@@ -2184,8 +2224,8 @@ _REMINDERS_17 = [
     "⚡️ Зарядка кончается? Нет — это продуктивность. Подзарядись делом.",
 ]
 
-async def send_evening_reminder(bot, chat_id: int):
-    """17:00 — случайная напоминалка."""
+async def send_afternoon_reminder(bot, chat_id: int):
+    """17:00 — случайная напоминалка + 2 ближайших задачи."""
     import datetime as _dt
     today = _dt.datetime.now(tz=UFA_TZ).date().isoformat()
     state_file = "data/reminder17_sent.json"
@@ -2199,7 +2239,36 @@ async def send_evening_reminder(bot, chat_id: int):
     try:
         import random
         msg = random.choice(_REMINDERS_17)
-        await send_with_retry(bot, chat_id, msg)
+
+        # Добавляем 2 ближайших задачи
+        tasks = get_pending_tasks()
+        now = datetime.datetime.now(tz=UFA_TZ)
+        with_deadline = []
+        for t in tasks:
+            try:
+                d = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
+                days = (d - now).days
+                with_deadline.append((days, t))
+            except Exception:
+                continue
+        with_deadline.sort(key=lambda x: x[0])
+
+        if with_deadline:
+            msg += "\n\n📌 *Ближайшие дедлайны:*"
+            for days, t in with_deadline[:2]:
+                course = t.get("course_name", "")[:20]
+                title = t.get("title", "")[:35]
+                if days < 0:
+                    when = "просрочено"
+                elif days == 0:
+                    when = "сегодня"
+                elif days == 1:
+                    when = "завтра"
+                else:
+                    when = f"через {days} дн."
+                msg += f"\n• {course} — {title} _({when})_"
+
+        await send_with_retry(bot, chat_id, msg, parse_mode="Markdown")
         os.makedirs("data", exist_ok=True)
         with open(state_file, "w") as f:
             json.dump({"date": today}, f)
@@ -2248,7 +2317,7 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
                       args=[bot, chat_id], id="quote_13", misfire_grace_time=3600)
 
     # 17:00 напоминалка
-    scheduler.add_job(send_evening_reminder, trigger="cron", hour=17, minute=0,
+    scheduler.add_job(send_afternoon_reminder, trigger="cron", hour=17, minute=0,
                       args=[bot, chat_id], id="reminder_17", misfire_grace_time=3600)
 
     # ── Воскресенье 20:00 недельный отчёт ──
@@ -2276,6 +2345,9 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
                       args=[bot, chat_id], id="random_reminder")
     scheduler.add_job(check_user_reminders, trigger="interval", minutes=5,
                       args=[bot, chat_id], id="user_reminders")
+    scheduler.add_job(sync_all_tasks, trigger="interval", minutes=30,
+                      args=[bot, chat_id], id="sync_tasks",
+                      start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=5))
     scheduler.add_job(check_lesson_reminders, trigger="interval", minutes=5,
                       args=[bot, chat_id], id="lesson_reminders")
 

@@ -19,7 +19,7 @@ import os, sys
 import asyncio
 import logging
 from telegram.ext import Application
-from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID, MODEUS_USERNAME, LMS_USERNAME, NETOLOGY_EMAIL, YANDEX_MAIL, OPENROUTER_KEYS, OPENWEATHER_KEY, VK_CHAT_URL
+from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID, MODEUS_USERNAME, LMS_USERNAME, NETOLOGY_EMAIL, YANDEX_MAIL, OPENROUTER_KEYS, OPENWEATHER_KEY, VK_CHAT_URL, USER_NAME
 from bot.handlers import register_handlers
 from scheduler import setup_scheduler
 from storage import ensure_data_dir
@@ -102,9 +102,15 @@ async def on_startup(app: Application):
         await app.bot.send_message(
             chat_id=MY_TELEGRAM_ID,
             text=(
-                "✅ *ДедЛайнер запущен!*\n\n"
-                "Я буду следить за твоими дедлайнами.\n"
-                "Напиши /help чтобы узнать команды."
+                "```\n"
+                "🖥 ИНИЦИАЛИЗАЦИЯ СИСТЕМЫ...\n\n"
+                "[██████████] 100%\n\n"
+                f"> ЖЕРТВА ИДЕНТИФИЦИРОВАНА: {USER_NAME}\n"
+                "> СТАТУС: подозрительно бездельничает\n"
+                "> ДЕДЛАЙНЫ: найдены\n"
+                "> СОВЕСТЬ: не обнаружена\n\n"
+                "⚠ СЛЕЖКА АКТИВИРОВАНА\n"
+                "```"
             ),
             parse_mode="Markdown"
         )

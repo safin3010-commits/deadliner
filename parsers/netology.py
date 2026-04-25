@@ -11,7 +11,7 @@ NETOLOGY_EVENTS_URL = f"{NETOLOGY_BASE_URL}/backend/api/user/programs/{{program_
 
 # Ищем дату в названии: "дедлайн 25.03.26", "дедлайн 30.12.2025", "до 11.01.26"
 _DEADLINE_RE = re.compile(
-    r"(?:дедлайн|до)\s+(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})",
+    r"(?:рекомендованный\s+)?(?:дедлайн|до)\s+(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})",
     re.IGNORECASE
 )
 
@@ -158,7 +158,7 @@ async def fetch_netology_deadlines() -> tuple[list, list]:
                         except Exception:
                             pass
 
-                    elif item_type in ["task", "test", "quiz"] and not passed:
+                    elif (item_type in ["task", "test", "quiz"] or (item_type == "text" and title.lower().startswith("домашнее задание"))) and not passed:
                         deadline_dt = _parse_deadline_from_title(title)
 
                         # Пропускаем если дедлайн прошёл более 10 дней назад

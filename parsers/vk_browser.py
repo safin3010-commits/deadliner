@@ -40,8 +40,8 @@ def _mark_hash_seen(msg_hash: str):
     hashes = seen.get("seen_hashes", [])
     if msg_hash not in hashes:
         hashes.append(msg_hash)
-    if len(hashes) > 200:
-        hashes = hashes[-200:]
+    if len(hashes) > 500:
+        hashes = hashes[-500:]
     seen["seen_hashes"] = hashes
     _save_seen(seen)
 
@@ -218,7 +218,7 @@ async def fetch_todays_vk_messages() -> list:
                 # Отправляем только сообщения со ссылками
                 if "http://" not in text and "https://" not in text:
                     continue
-                msg_hash = hashlib.md5(text.encode()).hexdigest()[:16]
+                msg_hash = hashlib.md5(text[:150].strip().encode()).hexdigest()[:16]
                 if not _is_hash_seen(msg_hash):
                     new_messages.append({"text": text, "hash": msg_hash})
 

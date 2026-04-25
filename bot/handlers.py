@@ -112,11 +112,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
     await update.message.reply_text(
-        f"👋 Привет, {USER_NAME}!\n\n"
-        "Я твой *ДедЛайнер*.\n"
-        "Слежу за дедлайнами и не даю лениться 😄\n\n"
-        "Используй кнопки меню внизу 👇",
-        parse_mode="Markdown",
+        "🖥 ИНИЦИАЛИЗАЦИЯ СИСТЕМЫ...\n\n"
+        "▓▓▓▓▓▓▓▓▓▓ 100%\n\n"
+        f"> ЖЕРТВА ИДЕНТИФИЦИРОВАНА: {USER_NAME}\n"
+        "> СТАТУС: подозрительно бездельничает\n"
+        "> ДЕДЛАЙНЫ: найдены\n"
+        "> СОВЕСТЬ: не обнаружена\n\n"
+        "⚠ СЛЕЖКА АКТИВИРОВАНА",
         reply_markup=main_menu_keyboard()
     )
 

@@ -17,6 +17,10 @@ echo "Старые процессы убиты"
 # Убиваем все оставшиеся экземпляры на всякий случай
 pkill -f "main\.py" 2>/dev/null; sleep 1
 
+# Не давать маку спать
+caffeinate -i &
+echo "Caffeinate запущен"
+
 # Запускаем
 venv/bin/python3 main.py >> bot.log 2>&1 &
 PID=$!
