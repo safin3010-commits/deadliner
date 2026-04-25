@@ -19,7 +19,7 @@ import os, sys
 import asyncio
 import logging
 from telegram.ext import Application
-from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID, MODEUS_USERNAME, LMS_USERNAME, NETOLOGY_EMAIL, YANDEX_MAIL, OPENROUTER_KEYS, OPENWEATHER_KEY, VK_CHAT_URL, USER_NAME
+from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID, MODEUS_USERNAME, LMS_USERNAME, NETOLOGY_EMAIL, YANDEX_MAIL, OPENROUTER_KEYS, GROQ_KEYS, VK_CHAT_URL, USER_NAME
 from bot.handlers import register_handlers
 from scheduler import setup_scheduler
 from storage import ensure_data_dir
@@ -54,8 +54,8 @@ async def check_setup(bot):
     if _is_setup_warned():
         return
     issues = []
-    if not OPENROUTER_KEYS:
-        issues.append("⚠️ *OpenRouter* — AI не работает (нет OPENROUTER_KEY_1)\nРегистрация: openrouter.ai")
+    if not OPENROUTER_KEYS and not GROQ_KEYS:
+        issues.append("⚠️ *AI* — не работает. Нужен ключ OpenRouter (openrouter.ai) или Groq (console.groq.com)")
     if not MODEUS_USERNAME:
         issues.append("⚠️ *Modeus* — нет расписания и оценок (нет MODEUS_USERNAME/PASSWORD)")
     if not LMS_USERNAME:
@@ -64,8 +64,6 @@ async def check_setup(bot):
         issues.append("⚠️ *Нетология* — нет заданий (нет NETOLOGY_EMAIL/PASSWORD)")
     if not YANDEX_MAIL:
         issues.append("⚠️ *Почта* — нет уведомлений о письмах (нет YANDEX_MAIL/APP_PASSWORD)")
-    if not OPENWEATHER_KEY:
-        issues.append("⚠️ *Погода* — не будет в утреннем брифинге (нет OPENWEATHER_KEY)")
     if not VK_CHAT_URL:
         issues.append("⚠️ *ВКонтакте* — мониторинг беседы выключен (нет VK_CHAT_URL)")
     if not issues:
