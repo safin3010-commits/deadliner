@@ -300,6 +300,36 @@ def main():
     yandex_pass = ask("Пароль приложения (Яндекс ID → Безопасность)", required=False) if yandex_mail else ""
     print()
 
+    # ── Яндекс Мессенджер ──
+    print("━" * 44)
+    print("ЯНДЕКС МЕССЕНДЖЕР (опционально)")
+    print("━" * 44)
+    messenger = ask("Настроить мессенджер? (y/n)", required=False, default="n")
+    if messenger.lower() == "y":
+        print("  Сейчас откроется браузер — войди в Яндекс Мессенджер и нажми Enter.")
+        try:
+            import asyncio as _asyncio
+            from parsers.messenger import MESSENGER_URL
+            from playwright.async_api import async_playwright
+            async def _login_messenger():
+                import json, os
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
+                    context = await browser.new_context()
+                    page = await context.new_page()
+                    await page.goto(MESSENGER_URL, timeout=30000)
+                    input("  >>> Нажми Enter когда мессенджер загрузился: ")
+                    cookies = await context.cookies()
+                    os.makedirs("data", exist_ok=True)
+                    with open("data/cookies_messenger.json", "w") as f:
+                        json.dump({"url": MESSENGER_URL, "cookies": cookies}, f, indent=2)
+                    print(f"  ✅ Сохранено {len(cookies)} cookies")
+                    await browser.close()
+            _asyncio.run(_login_messenger())
+        except Exception as e:
+            print(f"  ⚠️  Не удалось: {e}")
+    print()
+
     # ── ВКонтакте ──
     print("━" * 44)
     print("ВКОНТАКТЕ (опционально — мониторинг беседы)")
