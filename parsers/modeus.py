@@ -1,5 +1,6 @@
 import re
 import json
+import asyncio
 import datetime
 import httpx
 from bs4 import BeautifulSoup
@@ -63,18 +64,112 @@ def _set_cached_week(week_start: datetime.date, data: dict):
 
 # ─── Авторизация ──────────────────────────────────────────────────────
 
-async def _try_auth(http2: bool) -> str | None:
+def _try_auth_sync() -> str | None:
+    import requests
     from secrets import token_hex
-    from urllib.parse import urlparse
+    from urllib.parse import urlparse, urlencode
 
-    async with httpx.AsyncClient(timeout=60, follow_redirects=True, http2=http2, headers=HEADERS) as s:
-        r = await s.get(MODEUS_CONFIG_URL)
-        r.raise_for_status()
-        config = r.json()
+    s = requests.Session()
+    s.headers.update(HEADERS)
+
+    r = s.get(MODEUS_CONFIG_URL, timeout=30)
+    config = r.json()
+    client_id = config["wso"]["clientId"]
+    auth_url = config["wso"]["loginUrl"]
+
+    params = {
+        "client_id": client_id,
+        "redirect_uri": MODEUS_BASE_URL + "/",
+        "response_type": "id_token",
+        "scope": "openid",
+        "nonce": token_hex(16),
+        "state": token_hex(16),
+    }
+    r = s.get(auth_url, params=params, timeout=30, allow_redirects=True)
+    if r.status_code == 403:
+        return None
+
+    token = _token_re.search(r.url)
+    if token:
+        return token.group(1)
+
+    html = BeautifulSoup(r.text, "html.parser")
+    form = html.find("form")
+    if not form:
+        return None
+
+    form_action = form.get("action", r.url)
+    if form_action.startswith("/"):
+        p = urlparse(r.url)
+        form_action = f"{p.scheme}://{p.netloc}{form_action}"
+
+    login_data = {"UserName": MODEUS_USERNAME, "Password": MODEUS_PASSWORD, "AuthMethod": "FormsAuthentication"}
+    for inp in form.find_all("input", type="hidden"):
+        if inp.get("name"):
+            login_data[inp["name"]] = inp.get("value", "")
+
+    r = s.post(form_action, data=login_data, timeout=30, allow_redirects=True)
+    token = _token_re.search(r.url)
+    if token:
+        return token.group(1)
+
+    html2 = BeautifulSoup(r.text, "html.parser")
+    form2 = html2.find("form")
+    inputs2 = [i.get("name") for i in form2.find_all("input")] if form2 else []
+
+    if not form2 or ("UserName" in inputs2 and "Password" in inputs2):
+        return None
+
+    saml_action = form2.get("action", "https://auth.modeus.org/commonauth")
+    if saml_action.startswith("/"):
+        p = urlparse(r.url)
+        saml_action = f"{p.scheme}://{p.netloc}{saml_action}"
+
+    saml_data = {}
+    for inp in form2.find_all("input"):
+        if inp.get("name"):
+            saml_data[inp["name"]] = inp.get("value", "")
+
+    r2 = s.post(saml_action, data=saml_data, timeout=30, allow_redirects=False)
+    loc = r2.headers.get("Location", "")
+    token = _token_re.search(loc)
+    if token:
+        return token.group(1)
+
+    current = loc
+    for _ in range(8):
+        if not current:
+            break
+        r_step = s.get(current, timeout=10, allow_redirects=False)
+        next_loc = r_step.headers.get("Location", "")
+        token = _token_re.search(next_loc)
+        if token:
+            return token.group(1)
+        token = _token_re.search(r_step.url)
+        if token:
+            return token.group(1)
+        if not next_loc or next_loc == current:
+            break
+        current = next_loc
+
+    return None
+
+
+async def _try_auth(http2: bool) -> str | None:
+    import aiohttp
+    from secrets import token_hex
+    from urllib.parse import urlparse, urlencode
+
+    connector = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(connector=connector) as s:
+        # Получаем config
+        async with s.get(MODEUS_CONFIG_URL, timeout=aiohttp.ClientTimeout(total=30)) as r:
+            config = await r.json(content_type=None)
         client_id = config["wso"]["clientId"]
         auth_url = config["wso"]["loginUrl"]
 
-        r = await s.get(auth_url, params={
+        # Запрос авторизации
+        params = urlencode({
             "client_id": client_id,
             "redirect_uri": MODEUS_BASE_URL + "/",
             "response_type": "id_token",
@@ -82,18 +177,24 @@ async def _try_auth(http2: bool) -> str | None:
             "nonce": token_hex(16),
             "state": token_hex(16),
         })
+        async with s.get(f"{auth_url}?{params}", timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True) as r:
+            if r.status == 403:
+                return None
+            text = await r.text()
+            final_url = str(r.url)
 
-        if r.status_code == 403:
-            return None
+        token = _token_re.search(final_url)
+        if token:
+            return token.group(1)
 
-        html = BeautifulSoup(r.text, "lxml")
+        html = BeautifulSoup(text, "html.parser")
         form = html.find("form")
         if not form:
             return None
 
-        form_action = form.get("action", str(r.url))
+        form_action = form.get("action", final_url)
         if form_action.startswith("/"):
-            p = urlparse(str(r.url))
+            p = urlparse(final_url)
             form_action = f"{p.scheme}://{p.netloc}{form_action}"
 
         login_data = {"UserName": MODEUS_USERNAME, "Password": MODEUS_PASSWORD, "AuthMethod": "FormsAuthentication"}
@@ -101,9 +202,15 @@ async def _try_auth(http2: bool) -> str | None:
             if inp.get("name"):
                 login_data[inp["name"]] = inp.get("value", "")
 
-        r = await s.post(form_action, data=login_data)
+        async with s.post(form_action, data=login_data, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True) as r:
+            text2 = await r.text()
+            final_url2 = str(r.url)
 
-        html2 = BeautifulSoup(r.text, "lxml")
+        token = _token_re.search(final_url2)
+        if token:
+            return token.group(1)
+
+        html2 = BeautifulSoup(text2, "html.parser")
         form2 = html2.find("form")
         inputs2 = [i.get("name") for i in form2.find_all("input")] if form2 else []
 
@@ -112,7 +219,7 @@ async def _try_auth(http2: bool) -> str | None:
 
         saml_action = form2.get("action", "https://auth.modeus.org/commonauth")
         if saml_action.startswith("/"):
-            p = urlparse(str(r.url))
+            p = urlparse(final_url2)
             saml_action = f"{p.scheme}://{p.netloc}{saml_action}"
 
         saml_data = {}
@@ -120,8 +227,8 @@ async def _try_auth(http2: bool) -> str | None:
             if inp.get("name"):
                 saml_data[inp["name"]] = inp.get("value", "")
 
-        r2 = await s.post(saml_action, data=saml_data, follow_redirects=False)
-        loc = r2.headers.get("Location", "")
+        async with s.post(saml_action, data=saml_data, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=False) as r2:
+            loc = r2.headers.get("Location", "")
 
         token = _token_re.search(loc)
         if token:
@@ -131,12 +238,13 @@ async def _try_auth(http2: bool) -> str | None:
         for _ in range(8):
             if not current:
                 break
-            r_step = await s.get(current, follow_redirects=False)
-            next_loc = r_step.headers.get("Location", "")
+            async with s.get(current, timeout=aiohttp.ClientTimeout(total=10), allow_redirects=False) as r_step:
+                next_loc = r_step.headers.get("Location", "")
+                step_url = str(r_step.url)
             token = _token_re.search(next_loc)
             if token:
                 return token.group(1)
-            token = _token_re.search(str(r_step.url))
+            token = _token_re.search(step_url)
             if token:
                 return token.group(1)
             if not next_loc or next_loc == current:
@@ -147,19 +255,18 @@ async def _try_auth(http2: bool) -> str | None:
 
 
 async def get_modeus_jwt() -> str | None:
-    for use_http2 in [True, False]:
-        try:
-            token = await _try_auth(use_http2)
-            if token:
-                save_token("modeus_jwt", token)
-                save_token(
-                    "modeus_jwt_expires",
-                    (datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(hours=11)).isoformat()
-                )
-                print("Modeus: авторизация успешна ✅")
-                return token
-        except Exception as e:
-            print(f"Modeus auth ({'http2' if use_http2 else 'http1'}) failed: {e}")
+    try:
+        token = await asyncio.to_thread(_try_auth_sync)
+        if token:
+            save_token("modeus_jwt", token)
+            save_token(
+                "modeus_jwt_expires",
+                (datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(hours=11)).isoformat()
+            )
+            print("Modeus: авторизация успешна ✅")
+            return token
+    except Exception as e:
+        import traceback; traceback.print_exc(); print(f"Modeus auth failed: {e}")
     print("Modeus: не удалось авторизоваться")
     return None
 

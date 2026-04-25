@@ -5,9 +5,9 @@
 import httpx
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL_FAST = "openrouter/auto"   # автовыбор лучшей доступной модели
-MODEL_FAST_FALLBACK = "openrouter/auto"        # запасная бесплатная
-MODEL_SMART = "openrouter/auto"  # для теории и сложных задач
+MODEL_FAST = "google/gemini-2.0-flash-exp:free"   # автовыбор лучшей доступной модели
+MODEL_FAST_FALLBACK = "google/gemini-2.0-flash-exp:free"        # запасная бесплатная
+MODEL_SMART = "google/gemini-2.0-flash-exp:free"  # для теории и сложных задач
 
 from config import OPENROUTER_KEYS
 _current_key_idx = 0

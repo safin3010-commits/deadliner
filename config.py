@@ -76,8 +76,10 @@ USER_NAME = os.getenv("USER_NAME", "Студент")
 USER_CITY = os.getenv("USER_CITY", "")
 
 # Погода
-WEATHER_LAT = float(os.getenv("WEATHER_LAT", "55.7558"))
-WEATHER_LON = float(os.getenv("WEATHER_LON", "37.6173"))
+_lat = os.getenv("WEATHER_LAT", "").strip()
+_lon = os.getenv("WEATHER_LON", "").strip()
+WEATHER_LAT = float(_lat) if _lat else 55.7558
+WEATHER_LON = float(_lon) if _lon else 37.6173
 
 # ВКонтакте
 VK_CHAT_URL = os.getenv("VK_CHAT_URL", "")

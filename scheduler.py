@@ -1270,6 +1270,26 @@ async def _fetch_weather() -> str:
 MORNING_SENT_FILE = "data/morning_sent.json"
 
 
+EVENING_SENT_FILE = "data/evening_sent.json"
+
+def _is_evening_sent() -> bool:
+    try:
+        import json
+        from config import UFA_TZ
+        import datetime
+        with open(EVENING_SENT_FILE) as f:
+            data = json.load(f)
+        return data.get("date") == datetime.datetime.now(tz=UFA_TZ).date().isoformat()
+    except Exception:
+        return False
+
+def _mark_evening_sent():
+    import json, os, datetime
+    from config import UFA_TZ
+    os.makedirs("data", exist_ok=True)
+    with open(EVENING_SENT_FILE, "w") as f:
+        json.dump({"date": datetime.datetime.now(tz=UFA_TZ).date().isoformat()}, f)
+
 def _is_morning_sent() -> bool:
     try:
         with open(MORNING_SENT_FILE) as f:

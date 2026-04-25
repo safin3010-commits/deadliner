@@ -135,11 +135,10 @@ async def fetch_todays_vk_messages() -> list:
             cookies = json.load(f)
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                executable_path=CHROME_PATH,
-                proxy={"server": VK_PROXY}
-            )
+            _launch = {"headless": True, "executable_path": CHROME_PATH}
+            if VK_PROXY:
+                _launch["proxy"] = {"server": VK_PROXY}
+            browser = await p.chromium.launch(**_launch)
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
@@ -230,14 +229,17 @@ async def fetch_todays_vk_messages() -> list:
         return []
 
 
-async def save_cookies():
+async def save_cookies(chrome_path=None, vk_proxy=None):
     from playwright.async_api import async_playwright
+    _chrome = chrome_path or CHROME_PATH or None
+    _proxy = vk_proxy or VK_PROXY or None
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=False,
-            executable_path=CHROME_PATH,
-            proxy={"server": VK_PROXY}
-        )
+        launch_args = {"headless": False}
+        if _chrome:
+            launch_args["executable_path"] = _chrome
+        if _proxy:
+            launch_args["proxy"] = {"server": _proxy}
+        browser = await p.chromium.launch(**launch_args)
         context = await browser.new_context()
         page = await context.new_page()
         await page.goto("https://vk.com/login")

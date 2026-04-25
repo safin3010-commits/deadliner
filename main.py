@@ -76,7 +76,7 @@ async def check_setup(bot):
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Понятно, больше не показывать", callback_data="setup_warned")
     ]])
-    await bot.send_message(chat_id=MY_TELEGRAM_ID, text=text, parse_mode="Markdown", reply_markup=keyboard)
+    await bot.send_message(chat_id=MY_TELEGRAM_ID, text=text, reply_markup=keyboard)
 
 async def on_startup(app: Application):
     """Выполняется при старте бота."""
