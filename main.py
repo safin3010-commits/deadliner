@@ -8,7 +8,7 @@ if os.path.exists(_venv_python) and os.path.abspath(sys.executable) != os.path.a
 
 # ── Один экземпляр ──
 import tempfile as _tempfile
-_PID_FILE = _tempfile.gettempdir() + "/deadliner.pid"
+_PID_FILE = "/tmp/deadliner.pid"
 if os.path.exists(_PID_FILE):
     try:
         _old_pid = int(open(_PID_FILE).read().strip())
@@ -21,12 +21,20 @@ open(_PID_FILE, "w").write(str(os.getpid()))
 import atexit
 atexit.register(lambda: os.remove(_PID_FILE) if os.path.exists(_PID_FILE) else None)
 
-import os, sys
-
 import asyncio
 import logging
 from telegram.ext import Application
 from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID, MODEUS_USERNAME, LMS_USERNAME, NETOLOGY_EMAIL, YANDEX_MAIL, GROQ_KEYS, VK_CHAT_URL, USER_NAME
+
+# ── Проверка обязательных настроек ──
+if not TELEGRAM_TOKEN:
+    print("❌ Не заполнен TELEGRAM_TOKEN в .env")
+    print("   Запусти python3 setup.py чтобы настроить бота")
+    sys.exit(1)
+if not MY_TELEGRAM_ID:
+    print("❌ Не заполнен MY_TELEGRAM_ID в .env")
+    print("   Запусти python3 setup.py чтобы настроить бота")
+    sys.exit(1)
 from bot.handlers import register_handlers
 from scheduler import setup_scheduler
 from storage import ensure_data_dir
@@ -101,6 +109,10 @@ async def on_startup(app: Application):
 
     # Сохраняем scheduler в bot_data чтобы потом остановить
     app.bot_data["scheduler"] = scheduler
+
+    # Начальная синхронизация задач
+    from scheduler import sync_all_tasks
+    asyncio.create_task(sync_all_tasks())
 
     # Отправляем сообщение что бот запустился
     try:

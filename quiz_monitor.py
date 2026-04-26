@@ -21,17 +21,11 @@ _sent_attempts: set = set()
 
 def get_safari_url() -> str | None:
     try:
-        import sys
-        if sys.platform == "darwin":
-            # macOS — через osascript
-            result = subprocess.run(
-                ["osascript", "-e", 'tell application "Google Chrome" to return URL of active tab of front window'],
-                capture_output=True, text=True, timeout=3
-            )
-            url = result.stdout.strip()
-        else:
-            # Windows/Linux — автомониторинг недоступен
-            url = ""
+        result = subprocess.run(
+            ["osascript", "-e", 'tell application "Google Chrome" to return URL of active tab of front window'],
+            capture_output=True, text=True, timeout=3
+        )
+        url = result.stdout.strip()
         return url if url and url.startswith("http") else None
     except Exception:
         return None
@@ -281,10 +275,6 @@ async def monitor():
     print("🔍 Мониторинг Chrome запущен")
     print("   Открывай тесты в Chrome — вопросы придут в Telegram")
     print("   Ctrl+C для остановки\n")
-    if _sys.platform != "darwin":
-        await send_tg("ℹ️ На Windows/Linux автомониторинг недоступен.\nПередай URL теста: /quiz https://lms.utmn.ru/mod/quiz/attempt.php?attempt=...")
-        return
-
     # Сообщение отправляется из handlers.py
 
     last_url = None

@@ -145,8 +145,11 @@ async def fetch_lms_deadlines() -> tuple:
                     first_td = re.search(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
                     if first_td:
                         td_text = re.sub(r'<[^>]+>', ' ', first_td.group(1))
-                        first_word = td_text.strip().split()[0] if td_text.strip() else "-"
-                        grade = first_word
+                        raw = td_text.strip().split()[0] if td_text.strip() else "-"
+                        if re.match(r'^[\d.,]+$', raw) or raw in ("-", "—"):
+                            grade = raw
+                        else:
+                            grade = "-"
                     if _is_graded(grade):
                         completed_ids.add(f"lms_{mod_id}")
                         print(f"  ✓ выполнено: {task_name[:40]} (оценка: {grade})")
@@ -302,8 +305,11 @@ async def fetch_lms_grades_changes() -> list:
                     grade = "-"
                     if first_td:
                         td_text = re.sub(r'<[^>]+>', ' ', first_td.group(1))
-                        first_word = td_text.strip().split()[0] if td_text.strip() else "-"
-                        grade = first_word
+                        raw = td_text.strip().split()[0] if td_text.strip() else "-"
+                        if re.match(r'^[\d.,]+$', raw) or raw in ("-", "—"):
+                            grade = raw
+                        else:
+                            grade = "-"
 
                     cache_key = f"{course_id}_{mod_id}"
                     old_grade = cache.get(cache_key, {}).get("grade")

@@ -78,9 +78,7 @@ VK_PROXY = os.getenv("VK_PROXY", "")
 import platform as _platform
 _sys_platform = _platform.system()
 if not os.getenv("CHROME_PATH"):
-    if _sys_platform == "Windows":
-        CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-    elif _sys_platform == "Linux":
+    if _sys_platform == "Linux":
         CHROME_PATH = "/usr/bin/google-chrome"
     else:
         CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"

@@ -14,5 +14,3 @@ timezonefinder==6.5.9
 aiohttp>=3.9.0
 pycryptodomex>=3.9.0
 lz4>=4.0.0
-pycryptodomex>=3.9.0
-lz4>=4.0.0

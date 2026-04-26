@@ -587,13 +587,11 @@ async def check_grades_and_notify(bot, chat_id: int):
         try:
             lms_result = await fetch_lms_deadlines()
             if isinstance(lms_result, tuple):
-                _, completed_ids = lms_result
+                lms_tasks, completed_ids = lms_result
             else:
-                completed_ids = set()
-            existing_tasks = get_tasks()
-            marked = 0
+                lms_tasks, completed_ids = [], set()
             from storage import mark_lms_tasks_done
-            marked = mark_lms_tasks_done(completed_ids)
+            marked = mark_lms_tasks_done(completed_ids, lms_tasks)
             if marked:
                 print(f"Scheduler grades: помечено выполненными из LMS: {marked}")
         except Exception as e:
@@ -786,7 +784,7 @@ async def check_lesson_reminders(bot, chat_id: int):
         if now.hour < 7 or now.hour >= 22:
             return
 
-        schedule = await fetch_schedule_today()
+        schedule = await asyncio.wait_for(fetch_schedule_today(), timeout=15)
         if not schedule:
             return
 
@@ -1418,6 +1416,8 @@ async def send_midday_briefing(bot, chat_id: int):
             lines.append("")
 
         # Цитата дня на русском
+        _quote = ""
+        _author = ""
         try:
             import httpx as _httpx
             async with _httpx.AsyncClient(timeout=8) as _client:
@@ -1429,13 +1429,15 @@ async def send_midday_briefing(bot, chat_id: int):
                     _data = _r.json()
                     _quote = _data.get("quoteText", "").strip()
                     _author = _data.get("quoteAuthor", "").strip()
-                    if _quote:
-                        lines.append(f"{'─' * 20}")
-                        lines.append(f"💬 {_quote}")
-                        if _author:
-                            lines.append(f"— {_author}")
-        except Exception as e:
-            print(f"Forismatic midday error: {e}")
+        except Exception:
+            pass
+        if not _quote:
+            _quote = _get_quote()
+        if _quote:
+            lines.append(f"{'─' * 20}")
+            lines.append(f"💬 {_quote}")
+            if _author:
+                lines.append(f"— {_author}")
 
         await send_with_retry(bot, chat_id, "\n".join(lines))
         _mark_midday_sent()
@@ -1639,130 +1641,6 @@ async def send_evening_briefing(bot, chat_id: int):
 
 # ─── Итоги дня 23:00 ─────────────────────────────────────────────────
 
-async def send_daily_results(bot, chat_id: int):
-    """23:00 — итоги дня: пары + задачи + Groq анализ + спокойной ночи последним."""
-    try:
-        print("Scheduler: итоги дня 23:00...")
-        from grok import ask_grok
-        from bot.messages import _short_course
-
-        tasks = get_tasks()
-        now = datetime.datetime.now(tz=UFA_TZ)
-        today = now.date()
-
-        # Задачи выполненные сегодня
-        done_today = []
-        for t in tasks:
-            if not t.get("done"):
-                continue
-            done_at = t.get("done_at")
-            if done_at:
-                try:
-                    d = datetime.datetime.fromisoformat(done_at).astimezone(UFA_TZ).date()
-                    if d == today:
-                        done_today.append(t)
-                except Exception:
-                    pass
-
-        pending = [t for t in tasks if not t.get("done")]
-
-        # Пары которые прошли сегодня
-        schedule_today = await _retry(_fetch_schedule_fresh_or_cache) or []
-        passed = []
-        for lesson in schedule_today:
-            try:
-                end_dt = datetime.datetime.fromisoformat(lesson.get("end", ""))
-                if end_dt.tzinfo is None:
-                    end_dt = end_dt.replace(tzinfo=UFA_TZ)
-                if end_dt < now:
-                    passed.append(lesson)
-            except Exception:
-                continue
-
-        # Записываем статистику дня (переживает перезапуски)
-        record_daily_stats(len(done_today), len(pending), len(passed))
-
-        lines = ["🌃 *Итоги дня*\n"]
-
-        if passed:
-            lines.append("📚 *Пары сегодня:*")
-            for l in passed:
-                from bot.messages import _s
-                name = _s(l.get("course_name")) or _s(l.get("name"))
-                start = _s(l.get("start_time"))
-                lines.append(f"  ✓ {start} — {name}")
-            lines.append("")
-
-        lines.append(f"✅ Выполнено задач сегодня: *{len(done_today)}*")
-        if done_today:
-            for t in done_today[:5]:
-                course = _short_course(t.get("course_name", ""))
-                lines.append(f"  • {course} — {t['title'][:40]}")
-        else:
-            lines.append("  _ни одной задачи не отмечено_")
-
-        lines.append(f"📋 Осталось незакрытых: *{len(pending)}*")
-
-        try:
-            pairs_str = ", ".join(
-                (l.get("course_name") or l.get("name", ""))[:20]
-                for l in passed[:3]
-            ) if passed else "пар не было"
-            done_str = ", ".join(
-                t["title"][:25] for t in done_today[:3]
-            ) if done_today else "ничего не выполнено"
-            week_summary = get_stats_summary()
-            avg = get_weekly_done_avg()
-            prompt = (
-                f"Итог дня студента {USER_NAME}:\n"
-                f"Пары сегодня: {pairs_str}\n"
-                f"Выполнено задач сегодня: {len(done_today)} ({done_str})\n"
-                f"Осталось незакрытых: {len(pending)}\n"
-                f"Среднее выполненных за неделю: {avg} задач/день\n"
-                f"Статистика последних 7 дней:\n{week_summary}\n\n"
-                f"Напиши честный короткий анализ: сравни сегодня со средним за неделю, "
-                f"отметь прогресс или регресс, дай один конкретный совет на завтра.\n"
-                f"2-3 предложения. Только сам текст без пояснений, скобок и вариантов. "
-                f"Только русские слова. Перечитай и удали всё лишнее после последнего предложения."
-            )
-            analysis = await ask_grok(prompt)
-            if analysis:
-                lines.append(f"\n{'─' * 20}\n🤖 {analysis}")
-        except Exception as e:
-            print(f"Groq daily analysis error: {e}")
-        try:
-            import random as _random
-            jokes4 = [
-                "шутка про то что мозг продолжает учиться во сне",
-                "юмор про студента который сделал всё или почти всё",
-                "сарказм про завтрашние планы которые точно выполнятся",
-                "шутка про подушку как лучшего друга студента",
-                "мотивирующее пожелание с намёком на завтрашние задачи",
-                "шутка про то что во сне мозг компилирует весь код дня",
-                "юмор про студента ИТ который видит сны про рекурсию",
-                "шутка про то что завтра баги будут исправлены после сна",
-                "юмор про sleep который нужен и компьютеру и студенту",
-                "сарказм про то что завтра точно напишу чистый код",
-            ]
-            prompt = (
-                f"Студент {USER_NAME} идёт спать. Прошёл {len(passed)} пар, выполнил {len(done_today)} задач.\n"
-                f"Напиши смешное пожелание спокойной ночи.\n"
-                f"Ровно 1-2 предложения. После последней точки — ничего. Никаких скобок, пояснений, смайлов в конце. Только русские слова."
-            )
-            joke = await ask_grok(prompt, system=f"Ты пишешь короткие острые фразы. Формат ответа: только сам текст, 1-2 предложения, точка в конце. Никаких скобок, подписей, P.S., пояснений, вариантов. Пример правильного ответа: {USER_NAME}, дедлайн уже греет чайник — вставай и делай.")
-            if joke:
-                lines.append(f"😴 {_clean_joke(joke)}")
-        except Exception as e:
-            print(f"Groq night joke error: {e}")
-        await send_with_retry(bot, chat_id, "\n".join(lines))
-    except Exception as e:
-        print(f"Scheduler daily results error: {e}")
-
-
-
-# ─── Обёртки для study_theory ────────────────────────────────────────
-
-async def send_subject_theory_job(bot, chat_id: int):
     try:
         from study_theory import send_subject_theory
         await send_subject_theory(bot, chat_id)
@@ -1810,7 +1688,7 @@ async def check_vk_and_notify(bot, chat_id: int):
     if not (8 <= now.hour < 22):
         return
     try:
-        from parsers.vk_browser import fetch_todays_vk_messages, _mark_hash_seen, _format_with_ai, _load_seen, _save_seen
+        from parsers.vk_browser import fetch_todays_vk_messages, _mark_hash_seen, _format_with_ai
 
         # Хеши храним 3 дня — защита от дублей после перезапуска
         # Сброс не делаем, просто ограничиваем размер в _mark_hash_seen
@@ -1862,80 +1740,6 @@ async def check_vk_and_notify(bot, chat_id: int):
         print(f"VK check error: {e}")
 
 
-async def send_midday_briefing_no_vk(bot, chat_id: int):
-    """Дневная сводка без ВК блока — вызывается после получения ВК сообщения."""
-    try:
-        from grok import ask_grok
-        from bot.messages import _short_course
-
-        tasks = get_pending_tasks()
-        now = datetime.datetime.now(tz=UFA_TZ)
-
-        lines = ["🌞 *Дневная сводка*\n"]
-
-        # Срочные сегодня + завтра (только непросроченные)
-        urgent = []
-        for t in tasks:
-            if not t.get("deadline"):
-                continue
-            try:
-                dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
-                days = (dt - now).days
-                if 0 <= days <= 1:
-                    urgent.append((days, dt, t))
-            except Exception:
-                continue
-        urgent.sort(key=lambda x: (x[0], x[1]))
-
-        if urgent:
-            lines.append("🔴 *Горят дедлайны:*")
-            seen_titles = set()
-            shown = 0
-            for days, dt, t in urgent:
-                title = t.get("title", "")
-                if title in seen_titles:
-                    continue
-                seen_titles.add(title)
-                label = "🔴 сегодня" if days == 0 else "🟡 завтра"
-                course = _short_course(t.get("course_name", ""))
-                date_str = dt.strftime("%d.%m")
-                lines.append(f"  ❗ *{course}* — {title[:35]} _({label}, {date_str})_")
-                shown += 1
-                if shown >= 5:
-                    break
-        else:
-            lines.append("✅ Срочных дедлайнов нет")
-
-        await send_with_retry(bot, chat_id, "\n".join(lines))
-
-        # Шутка
-        try:
-            import random as _r
-            jokes = [
-                "шутка про дедлайны которые уже близко",
-                "сарказм про студента который смотрит в потолок",
-                "мотивация через страх провалить сессию",
-                "юмор про то что задачи сами себя не сдадут",
-                "жёсткий юмор про откладывание на потом",
-            ]
-            prompt = (
-                f"Студент {USER_NAME}, осталось задач: {len(tasks)}. "
-                f"Стиль: {_r.choice(jokes)}. "
-                f"Напиши ОДНУ оригинальную смешную фразу. "
-                f"Можно лёгкий мат. 1-2 предложения. Не начинай с Чувак."
-            )
-            joke = await ask_grok(prompt)
-            if joke:
-                await send_with_retry(bot, chat_id, f"😤 {joke}")
-        except Exception:
-            pass
-
-    except Exception as e:
-        print(f"Midday no vk error: {e}")
-
-
-
-async def check_lms_grades_and_notify(bot, chat_id: int):
     """Каждый час — проверяем новые оценки в LMS."""
     try:
         from parsers.lms import fetch_lms_grades_changes
@@ -1992,61 +1796,6 @@ def _mark_midday_sent():
         _json.dump({"date": today}, f)
 
 
-async def send_goodnight(bot, chat_id: int):
-    """23:00 — спокойной ночи + анекдот с anekdot.ru."""
-    try:
-        print("Scheduler: спокойной ночи 23:00...")
-        from grok import ask_grok
-        import httpx
-
-        anekdot = ""
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get(
-                    "https://jokesrv.ephemera.services/",
-                    headers={"Accept": "application/json"}
-                )
-                if r.status_code == 200:
-                    data = r.json()
-                    joke_en = data.get("content", "")
-                    if joke_en:
-                        # Переводим через ИИ
-                        translated = await ask_grok(
-                            f"Переведи этот анекдот на русский, сохрани юмор и стиль. "
-                            f"Только перевод, без пояснений:\n{joke_en}"
-                        )
-                        if translated:
-                            anekdot = translated
-        except Exception as e:
-            print(f"Goodnight: анекдот не загрузился: {e}")
-
-        # Если анекдот не получили — генерируем через ИИ
-        if not anekdot:
-            try:
-                anekdot = await ask_grok(
-                    "Расскажи короткий смешной анекдот про студентов, программистов или учёбу. "
-                    "Только сам анекдот, без предисловий. 3-5 предложений.",
-                    system="Ты рассказываешь анекдоты. Только текст анекдота, ничего лишнего."
-                )
-            except Exception as e:
-                print(f"Goodnight: ИИ анекдот не сгенерировался: {e}")
-
-        lines = [f"😴 *Спокойной ночи, {USER_NAME}!*\n"]
-        if anekdot:
-            lines.append(f"{'─' * 20}")
-            lines.append(f"😄 *Анекдот на ночь:*\n")
-            lines.append(anekdot)
-            lines.append(f"{'─' * 20}")
-
-        await send_with_retry(bot, chat_id, "\n".join(lines))
-    except Exception as e:
-        print(f"Scheduler goodnight error: {e}")
-
-
-
-# ─── Цитата дня 13:00 ────────────────────────────────────────────────
-
-def _get_quote() -> str:
     """Берём случайную цитату из файла, каждая появляется раз за полный цикл."""
     import json, os, random
     quotes_file = "data/quotes.json"
