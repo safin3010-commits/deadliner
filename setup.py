@@ -318,14 +318,18 @@ def main():
                     context = await browser.new_context()
                     page = await context.new_page()
                     await page.goto(MESSENGER_URL, timeout=30000)
-                    input("  >>> Нажми Enter когда мессенджер загрузился: ")
-                    cookies = await context.cookies()
-                    os.makedirs("data", exist_ok=True)
-                    with open("data/cookies_messenger.json", "w") as f:
-                        json.dump({"url": MESSENGER_URL, "cookies": cookies}, f, indent=2)
-                    print(f"  ✅ Сохранено {len(cookies)} cookies")
-                    await browser.close()
-            _asyncio.run(_login_messenger())
+                    return context, browser
+            context, browser = _asyncio.run(_login_messenger())
+            input("  >>> Нажми Enter когда мессенджер загрузился: ")
+            async def _save_messenger_cookies(context, browser):
+                import json, os
+                cookies = await context.cookies()
+                os.makedirs("data", exist_ok=True)
+                with open("data/cookies_messenger.json", "w") as f:
+                    json.dump({"url": MESSENGER_URL, "cookies": cookies}, f, indent=2)
+                print(f"  ✅ Сохранено {len(cookies)} cookies")
+                await browser.close()
+            _asyncio.run(_save_messenger_cookies(context, browser))
         except Exception as e:
             print(f"  ⚠️  Не удалось: {e}")
     print()
