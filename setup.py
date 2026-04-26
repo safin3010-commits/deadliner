@@ -310,25 +310,25 @@ def main():
             import asyncio as _asyncio
             from parsers.messenger import MESSENGER_URL
             from playwright.async_api import async_playwright
-            async def _login_messenger():
-                import json, os
-                async with async_playwright() as p:
-                    browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
-                    context = await browser.new_context()
-                    page = await context.new_page()
-                    await page.goto(MESSENGER_URL, timeout=30000)
-                    return context, browser
-            context, browser = _asyncio.run(_login_messenger())
-            input("  >>> Нажми Enter когда мессенджер загрузился: ")
-            async def _save_messenger_cookies(context, browser):
-                import json, os
-                cookies = await context.cookies()
-                os.makedirs("data", exist_ok=True)
-                with open("data/cookies_messenger.json", "w") as f:
-                    json.dump({"url": MESSENGER_URL, "cookies": cookies}, f, indent=2)
-                print(f"  ✅ Сохранено {len(cookies)} cookies")
-                await browser.close()
-            _asyncio.run(_save_messenger_cookies(context, browser))
+            def _login_messenger_sync():
+                import json, os, asyncio as _aio
+                async def _inner():
+                    async with async_playwright() as p:
+                        browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
+                        context = await browser.new_context()
+                        page = await context.new_page()
+                        await page.goto(MESSENGER_URL, timeout=30000)
+                        return await context.cookies(), browser
+                cookies, browser = _aio.run(_inner())
+                return cookies
+            print("  Браузер открыт. Войди в Яндекс Мессенджер.")
+            input("  >>> Нажми Enter когда загрузился список чатов: ")
+            cookies = _login_messenger_sync()
+            import json, os
+            os.makedirs("data", exist_ok=True)
+            with open("data/cookies_messenger.json", "w") as f:
+                json.dump({"url": MESSENGER_URL, "cookies": cookies}, f, indent=2)
+            print(f"  ✅ Сохранено {len(cookies)} cookies")
         except Exception as e:
             print(f"  ⚠️  Не удалось: {e}")
     print()
