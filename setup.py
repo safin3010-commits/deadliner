@@ -310,6 +310,11 @@ def main():
             import asyncio as _asyncio
             from parsers.messenger import MESSENGER_URL
             from playwright.async_api import async_playwright
+            import threading as _threading
+            _cookies_result = []
+            _ready_event = _threading.Event()
+            _done_event = _threading.Event()
+
             async def _open_browser():
                 async with async_playwright() as p:
                     browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
@@ -317,11 +322,19 @@ def main():
                     page = await context.new_page()
                     await page.goto(MESSENGER_URL, timeout=30000)
                     await page.wait_for_timeout(2000)
-                    input("  >>> Нажми Enter когда загрузился список чатов: ")
+                    _ready_event.set()
+                    _done_event.wait()
                     cookies = await context.cookies()
                     await browser.close()
-                    return cookies
-            cookies = _asyncio.run(_open_browser())
+                    _cookies_result.extend(cookies)
+
+            _thread = _threading.Thread(target=lambda: _asyncio.run(_open_browser()))
+            _thread.start()
+            _ready_event.wait()
+            input("  >>> Нажми Enter когда загрузился список чатов: ")
+            _done_event.set()
+            _thread.join()
+            cookies = _cookies_result
             import json, os
             os.makedirs("data", exist_ok=True)
             with open("data/cookies_messenger.json", "w") as f:
