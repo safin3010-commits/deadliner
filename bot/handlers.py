@@ -1356,7 +1356,8 @@ async def analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Часть 1: анализ каждого предмета (баллы, шансы, посещаемость).
 Часть 2: общий вывод, критические предметы, топ-3 приоритета, конкретный план."""
 
-        prompt = f"""Данные успеваемости на 19 апреля 2026 (середина семестра):
+        now_str = datetime.datetime.now(tz=UFA_TZ).strftime("%d %B %Y")
+        prompt = f"""Данные успеваемости на {now_str} (середина семестра):
 
 {raw}
 
@@ -1436,6 +1437,7 @@ def register_handlers(app):
     app.add_handler(CommandHandler("streak", streak_command))
     app.add_handler(CommandHandler("grades", grades_cmd))
     app.add_handler(CommandHandler("quiz", quiz_command))
+    app.add_handler(CommandHandler("analysis", analysis_command))
     app.add_handler(CommandHandler("quizstop", quizstop_command))
 
     app.add_handler(add_conv)

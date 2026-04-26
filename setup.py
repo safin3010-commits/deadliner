@@ -391,6 +391,7 @@ def main():
 
     with open(".env", "w", encoding="utf-8") as f:
         f.write("\n".join(env_lines))
+    os.chmod(".env", 0o600)
     print("  ✅ Файл .env создан")
 
     # ── ВК cookies после записи .env ──

@@ -6,7 +6,7 @@ load_dotenv()
 
 # Telegram
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-MY_TELEGRAM_ID = int(os.getenv("MY_TELEGRAM_ID"))
+MY_TELEGRAM_ID = int(os.getenv("MY_TELEGRAM_ID", "0"))
 
 # Modeus
 MODEUS_USERNAME = os.getenv("MODEUS_USERNAME")

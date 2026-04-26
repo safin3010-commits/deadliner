@@ -35,7 +35,7 @@ def add_reminder(task_id: str, task_title: str, interval_minutes: int, times: in
     else:
         first_fire = now + datetime.timedelta(minutes=interval_minutes)
     reminder = {
-        "id": f"rem_{int(now.timestamp())}",
+        "id": f"rem_{int(now.timestamp())}_{__import__('random').randint(1000,9999)}",
         "task_id": str(task_id),
         "task_title": task_title,
         "interval_minutes": interval_minutes,
