@@ -1,5 +1,11 @@
 import os, sys
 
+# ── Авто-перезапуск через venv если запущен не из него ──
+_venv_python = os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", "python3")
+if os.path.exists(_venv_python) and os.path.abspath(sys.executable) != os.path.abspath(_venv_python):
+    print("⚡ Перезапускаю через venv...")
+    os.execv(_venv_python, [_venv_python] + sys.argv)
+
 # ── Один экземпляр ──
 import tempfile as _tempfile
 _PID_FILE = _tempfile.gettempdir() + "/deadliner.pid"
