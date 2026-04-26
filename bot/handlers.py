@@ -232,6 +232,7 @@ async def handle_schedule_callback(update: Update, context: ContextTypes.DEFAULT
         action, period = data.split(":", 1)
         use_cache = action == "sched_cache"
         await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text("⏳ Загружаю расписание...")
         await _load_and_send_schedule(query.message, period, use_cache)
         return
     period = data.split(":")[1]
