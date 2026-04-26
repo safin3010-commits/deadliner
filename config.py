@@ -43,23 +43,12 @@ VK_USER_TOKEN = os.getenv("VK_USER_TOKEN")
 # Yandex TTS
 YANDEX_TTS_KEY = os.getenv("YANDEX_TTS_KEY")
 
-# OpenRouter — читаем все ключи OPENROUTER_KEY_* динамически
 import random as _random
-_openrouter_keys = []
-_i = 1
-while True:
-    _k = os.getenv(f"OPENROUTER_KEY_{_i}")
-    if not _k:
-        break
-    _openrouter_keys.append(_k)
-    _i += 1
-_random.shuffle(_openrouter_keys)
-OPENROUTER_KEYS = _openrouter_keys
 
-# OpenWeatherMap
+# OpenWeatherMap (не используется — погода через Open-Meteo)
 OPENWEATHER_KEY = os.getenv("OPENWEATHER_KEY")
 
-# Groq — фоллбэк когда OpenRouter исчерпан
+# Groq — основной AI
 _groq_keys = []
 _gi = 1
 while True:

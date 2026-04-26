@@ -260,10 +260,10 @@ def main():
     print("━" * 44)
     print("AI (нужен хотя бы один ключ)")
     print("━" * 44)
-    print("  OpenRouter (openrouter.ai) — авто-выбор лучшей модели")
-    print("  Groq (console.groq.com) — llama-3.3-70b, быстро и бесплатно")
-    openrouter = ask("Ключ OpenRouter", required=False)
+    print("  Groq (console.groq.com) — llama-3.3-70b, бесплатно")
+    print("  Регистрация: https://console.groq.com")
     groq_key = ask("Ключ Groq", required=False)
+    openrouter = ""
     print()
 
     # ── Учёба ──
@@ -342,7 +342,6 @@ def main():
     vk_proxy = ""
     chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     if vk_chat_url:
-        vk_proxy = ask("Прокси (например http://127.0.0.1:10808), Enter — пропустить", required=False)
     print()
 
     # ── Пишем .env ──
@@ -357,7 +356,6 @@ def main():
     add("USER_NAME", name)
     add("TIMEZONE", timezone)
     env_lines.append("")
-    add("OPENROUTER_KEY_1", openrouter)
     add("GROQ_KEY_1", groq_key)
     env_lines.append("")
     add("MODEUS_USERNAME", modeus_login)
