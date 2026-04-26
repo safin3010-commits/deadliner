@@ -1113,8 +1113,7 @@ async def _fetch_weather() -> str:
         if e_temp is not None:
             out.append(f"{_icon(e_code)} Вечером {round(e_temp)}°C, {WMO.get(e_code,'')}, ветер {round(e_wind)} м/с")
 
-        return "
-".join(out)
+        return "\n".join(out)
 
     except Exception as e:
         print(f"Weather fetch error: {e}")
