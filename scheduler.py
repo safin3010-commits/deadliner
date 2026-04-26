@@ -1639,15 +1639,6 @@ async def send_evening_briefing(bot, chat_id: int):
         print(f"Scheduler evening briefing error: {e}")
 
 
-# ─── Итоги дня 23:00 ─────────────────────────────────────────────────
-
-    try:
-        from study_theory import send_subject_theory
-        await send_subject_theory(bot, chat_id)
-    except Exception as e:
-        print(f"subject theory error: {e}")
-
-
 async def send_subject_theory_job(bot, chat_id: int):
     try:
         from study_theory import send_subject_theory
@@ -1786,37 +1777,6 @@ async def check_vk_and_notify(bot, chat_id: int):
         print(f"VK check error: {e}")
 
 
-    """Каждый час — проверяем новые оценки в LMS."""
-    try:
-        from parsers.lms import fetch_lms_grades_changes
-        from bot.messages import format_lms_grade_notification
-        from storage import get_tasks, save_tasks
-
-        changes = await _retry(fetch_lms_grades_changes) or []
-
-        if changes:
-            for change in changes:
-                sent_key = change.get("_sent_key", "")
-                grade_key = f"lms_grade:{sent_key}"
-                if _is_notification_sent(grade_key):
-                    continue
-                text = format_lms_grade_notification(change)
-                sent_ok = await send_with_retry(bot, chat_id, _notify_header("🎓 Новая оценка — LMS") + text)
-                if sent_ok:
-                    _mark_notification_sent(grade_key)
-                    # Помечаем в LMS sent после успешной отправки
-                    try:
-                        from parsers.lms import _load_lms_grades_sent, _save_lms_grades_sent
-                        _sent = _load_lms_grades_sent()
-                        _sent.add(sent_key)
-                        _save_lms_grades_sent(_sent)
-                    except Exception:
-                        pass
-
-    except Exception as e:
-        print(f"LMS grades notify error: {e}")
-
-
 MIDDAY_SENT_FILE = "data/midday_sent.json"
 EVENING_SENT_FILE = "data/evening_sent.json"
 
@@ -1840,34 +1800,6 @@ def _mark_midday_sent():
     today = datetime.datetime.now(tz=UFA_TZ).date().isoformat()
     with open(MIDDAY_SENT_FILE, "w") as f:
         _json.dump({"date": today}, f)
-
-
-    """Берём случайную цитату из файла, каждая появляется раз за полный цикл."""
-    import json, os, random
-    quotes_file = "data/quotes.json"
-    state_file = "data/quotes_state.json"
-    try:
-        with open(quotes_file, encoding="utf-8") as f:
-            all_quotes = json.load(f)
-    except Exception:
-        return "Успех — это сумма небольших усилий, повторяемых день за днём."
-    # Загружаем состояние
-    try:
-        with open(state_file) as f:
-            state = json.load(f)
-    except Exception:
-        state = {"remaining": []}
-    remaining = state.get("remaining", [])
-    # Если очередь пуста — перезаполняем и перемешиваем
-    if not remaining:
-        remaining = list(range(len(all_quotes)))
-        random.shuffle(remaining)
-    idx = remaining.pop(0)
-    # Сохраняем состояние
-    os.makedirs("data", exist_ok=True)
-    with open(state_file, "w") as f:
-        json.dump({"remaining": remaining}, f)
-    return all_quotes[idx]
 
 
 def _get_quote() -> str:
