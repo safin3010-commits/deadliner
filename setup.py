@@ -242,7 +242,20 @@ def ask_city():
 def main():
     clear()
     header()
-    print("Привет! Отвечай на вопросы. Enter — пропустить необязательное.")
+    print("Привет! Сначала установлю зависимости, потом задам вопросы.")
+    print()
+
+    print("━" * 44)
+    print("УСТАНОВКА ЗАВИСИМОСТЕЙ")
+    print("━" * 44)
+    if not create_venv():
+        sys.exit(1)
+    if not install_deps():
+        sys.exit(1)
+    install_playwright()
+    print()
+
+    print("Отвечай на вопросы. Enter — пропустить необязательное.")
     print()
 
     # ── Обязательные ──
@@ -404,17 +417,6 @@ def main():
             print("  ✅ ВКонтакте — cookies сохранены")
         except Exception as e:
             print(f"  ⚠️  Не удалось сохранить cookies ВК: {e}")
-
-    # ── Установка ──
-    print()
-    print("━" * 44)
-    print("УСТАНОВКА ЗАВИСИМОСТЕЙ")
-    print("━" * 44)
-    if not create_venv():
-        sys.exit(1)
-    if not install_deps():
-        sys.exit(1)
-    install_playwright()
 
     # ── Запуск ──
     print()
