@@ -134,6 +134,10 @@ def main():
     app = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
+        .connect_timeout(30)
+        .read_timeout(30)
+        .write_timeout(30)
+        .pool_timeout(30)
         .post_init(on_startup)
         .post_shutdown(on_shutdown)
         .build()
