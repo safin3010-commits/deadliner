@@ -1741,9 +1741,6 @@ async def check_vk_and_notify(bot, chat_id: int):
                 vk_text = msg["text"]
                 msg_hash = msg["hash"]
 
-                # Сразу помечаем как увиденное — чтобы не отправить дважды даже при ошибке
-                _mark_hash_seen(msg_hash)
-
                 # Форматируем через AI
                 formatted = await _format_with_ai(vk_text)
                 if not formatted:
@@ -1755,6 +1752,7 @@ async def check_vk_and_notify(bot, chat_id: int):
                     full_text = full_text[:4000]
 
                 # Отправляем в HTML
+                sent_ok = False
                 try:
                     await bot.send_message(
                         chat_id=chat_id,
@@ -1762,15 +1760,24 @@ async def check_vk_and_notify(bot, chat_id: int):
                         parse_mode="HTML",
                         disable_web_page_preview=True
                     )
+                    sent_ok = True
                 except Exception:
                     # Если HTML не прошёл — отправляем без форматирования
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=full_text,
-                        disable_web_page_preview=True
-                    )
+                    try:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=full_text,
+                            disable_web_page_preview=True
+                        )
+                        sent_ok = True
+                    except Exception:
+                        pass
 
-                print(f"VK: отправлено сообщение hash={msg_hash}")
+                if sent_ok:
+                    _mark_hash_seen(msg_hash)
+                    print(f"VK: отправлено сообщение hash={msg_hash}")
+                else:
+                    print(f"VK: не удалось отправить hash={msg_hash}")
 
             except Exception as e:
                 print(f"VK: ошибка отправки сообщения: {e}")
