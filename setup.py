@@ -308,8 +308,8 @@ def main():
         print("  Сейчас откроется браузер — войди в Яндекс Мессенджер и нажми Enter.")
         try:
             import asyncio as _asyncio
-            from parsers.messenger import MESSENGER_URL
             from playwright.async_api import async_playwright
+            MESSENGER_URL = "https://messenger.360.yandex.ru"
             import threading as _threading
             _cookies_result = []
             _ready_event = _threading.Event()
