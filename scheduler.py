@@ -422,8 +422,21 @@ async def sync_all_tasks(bot=None, chat_id=None):
             # Уведомление — отдельно от добавления, по notified_key
             if bot and chat_id and t.get("source") in ("lms", "netology"):
                 if notif_key not in notified:
+                    # Тихий старт — первые 20 минут только помечаем, не шлём
+                    grace_file = "data/startup_grace.json"
+                    in_grace = False
+                    try:
+                        if _os3.path.exists(grace_file):
+                            import time as _time
+                            grace_data = json.load(open(grace_file))
+                            if _time.time() - grace_data.get("started_at", 0) < 1200:
+                                in_grace = True
+                    except Exception:
+                        pass
                     notified.append(notif_key)
                     notified_changed = True
+                    if in_grace:
+                        continue
                     source_name = "LMS" if t.get("source") == "lms" else "Нетология"
                     title = t.get("title", "Без названия")
                     course = t.get("course_name", "")

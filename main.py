@@ -110,6 +110,12 @@ async def on_startup(app: Application):
     # Сохраняем scheduler в bot_data чтобы потом остановить
     app.bot_data["scheduler"] = scheduler
 
+    # Тихий старт — помечаем время запуска, первые 20 мин не шлём спам
+    import time as _time, json as _json, os as _os
+    _os.makedirs("data", exist_ok=True)
+    with open("data/startup_grace.json", "w") as _f:
+        _json.dump({"started_at": _time.time()}, _f)
+
     # Начальная синхронизация задач
     from scheduler import sync_all_tasks
     asyncio.create_task(sync_all_tasks(app.bot, MY_TELEGRAM_ID))
