@@ -31,3 +31,5 @@ start_jarvis.sh
 !data/quotes.json
 !data/english_words_backup.json
 !data/english_rules_backup.json
+jarvis.py
+start_jarvis.sh
