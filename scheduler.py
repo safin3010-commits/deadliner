@@ -1324,13 +1324,6 @@ async def send_morning_briefing(bot, chat_id: int):
                             lines.append(f"— {_author}")
         except Exception as e:
             print(f"Forismatic morning error: {e}")
-        # Анализ учёбы
-        try:
-            study = await _get_study_analysis_short()
-            if study:
-                lines.append(f"\n{'─' * 20}\n📊 *УЧЁБА*\n{study}")
-        except Exception as e:
-            print(f"Morning study analysis error: {e}")
 
         await send_with_retry(bot, chat_id, "\n".join(lines))
         _mark_morning_sent()
@@ -1375,48 +1368,49 @@ async def send_midday_briefing(bot, chat_id: int):
             lines.append("📅 Пар сегодня нет 🎉")
             lines.append("")
 
-        # Дедлайны сегодня + завтра
-        urgent = []
-        for t in tasks:
-            if not t.get("deadline"):
-                continue
+        # Ближайшая задача + мотивация от ИИ
+        nearest = sorted(
+            [t for t in tasks if t.get("deadline")],
+            key=lambda x: x["deadline"]
+        )
+        if nearest:
+            t = nearest[0]
+            course = t.get("course_name", "")
+            title = t.get("title", "")
             try:
                 dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
                 days = (dt - now).days
-                if 0 <= days <= 1:
-                    urgent.append((days, t))
+                if days < 0:
+                    when = "просрочено"
+                elif days == 0:
+                    when = "сегодня"
+                elif days == 1:
+                    when = "завтра"
+                else:
+                    when = f"через {days} дн."
+                date_str = dt.strftime("%d.%m")
             except Exception:
-                continue
-        urgent.sort(key=lambda x: x[0])
-
-        if urgent:
-            has_today = any(d == 0 for d, _ in urgent)
-            has_tomorrow = any(d == 1 for d, _ in urgent)
-            if has_today and has_tomorrow:
-                dl_label = "СЕГОДНЯ И ЗАВТРА"
-            elif has_today:
-                dl_label = "СЕГОДНЯ"
-            else:
-                dl_label = "ЗАВТРА"
-            lines.append(f"*🔴 ДЕДЛАЙНЫ — {dl_label}*")
+                when = ""
+                date_str = ""
+            lines.append(f"*📌 ЗАДАЧА ДНЯ*")
             lines.append(SEP)
-            seen_titles = set()
-            for days, t in urgent[:5]:
-                title = t.get("title", "")
-                if title in seen_titles:
-                    continue
-                seen_titles.add(title)
-                try:
-                    dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
-                    date_str = dt.strftime("%d.%m")
-                except Exception:
-                    date_str = ""
-                course = _short_course(t.get("course_name", ""))
-                prefix = f"{course} — " if course else ""
-                lines.append(f"❗  {prefix}{title}  •  {date_str}")
+            lines.append(f"{course} — {title}")
+            lines.append(f"📅 Дедлайн: {date_str} _({when})_")
             lines.append("")
+            try:
+                prompt = (
+                    f"Задача студента {USER_NAME}: {course} — {title}, дедлайн {when}. "
+                    f"Напиши 2 предложения — короткую мотивацию закрыть именно эту задачу сегодня. "
+                    f"Конкретно, без воды, по-русски. Можно с юмором."
+                )
+                motivation = await ask_grok(prompt)
+                if motivation:
+                    lines.append(f"💪 {motivation}")
+                    lines.append("")
+            except Exception as e:
+                print(f"Midday motivation error: {e}")
         else:
-            lines.append("✅ Срочных дедлайнов нет")
+            lines.append("✅ Активных задач нет")
             lines.append("")
 
         # Цитата дня на русском
@@ -1490,29 +1484,21 @@ async def send_evening_briefing(bot, chat_id: int):
         schedule_today = await _retry(_fetch_schedule_fresh_or_cache) or []
         passed_today = schedule_today
 
-        # Дедлайны завтра + послезавтра
-        urgent = []
-        for t in pending:
-            if not t.get("deadline"):
-                continue
+        # 3 ближайших актуальных задачи (только days >= 0)
+        _seen_titles = set()
+        upcoming_tasks = []
+        for t in sorted([t for t in pending if t.get("deadline")], key=lambda x: x["deadline"]):
             try:
-                d = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ).date()
-                if d in (tomorrow, after_tomorrow):
-                    days_left = (d - today).days
-                    urgent.append((days_left, t))
+                d = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
+                days_left = (d - now).days
+                if days_left < 0:
+                    continue
+                _title = t.get("title", "")
+                if _title not in _seen_titles:
+                    _seen_titles.add(_title)
+                    upcoming_tasks.append((days_left, t))
             except Exception:
                 continue
-        urgent.sort(key=lambda x: x[0])
-
-        # 2 задачи закрыть сегодня вечером (ближайшие по дедлайну, без дублей)
-        _seen_titles = set()
-        _close_candidates = []
-        for t in sorted([t for t in pending if t.get("deadline")], key=lambda x: x["deadline"]):
-            _title = t.get("title", "")
-            if _title not in _seen_titles:
-                _seen_titles.add(_title)
-                _close_candidates.append(t)
-        close_tonight = _close_candidates[:2]
 
         # Записываем статистику
         record_daily_stats(len(done_today), len(pending), len(passed_today))
@@ -1554,40 +1540,34 @@ async def send_evening_briefing(bot, chat_id: int):
             lines.append("  Пар нет 🎉")
         lines.append("")
 
-        # Дедлайны завтра-послезавтра
-        if urgent:
-            lines.append("⚠️ *Дедлайны завтра-послезавтра:*")
-            for days_left, t in urgent[:4]:
-                label = "завтра" if days_left == 1 else "послезавтра"
-                if t.get("source") == "manual":
-                    course = "Личная задача"
+        # Закрой до сна — самая ближайшая задача
+        if upcoming_tasks:
+            days_left, t = upcoming_tasks[0]
+            course = t.get("course_name", "")
+            title = t.get("title", "")
+            if days_left == 0:
+                when = "сегодня"
+            elif days_left == 1:
+                when = "завтра"
+            else:
+                when = f"через {days_left} дн."
+            lines.append("🎯 *Закрой до сна:*")
+            lines.append(f"  {course} — {title} _({when})_")
+            lines.append("")
+
+        # 3 ближайших задачи
+        if len(upcoming_tasks) > 1:
+            lines.append("📌 *Ближайшие задачи:*")
+            for days_left, t in upcoming_tasks[1:4]:
+                course = t.get("course_name", "")
+                title = t.get("title", "")
+                if days_left == 0:
+                    when = "сегодня"
+                elif days_left == 1:
+                    when = "завтра"
                 else:
-                    course = t.get("course_name", "")
-                lines.append(f"  🔴 {course} — {t['title']} _({label})_")
-            lines.append("")
-
-        # Закрыть сегодня вечером
-        if close_tonight:
-            lines.append("🎯 *Закрой сегодня вечером:*")
-            for t in close_tonight:
-                course = t.get("course_name", "")
-                title = t.get("title", "")
-                lines.append(f"  • {course} — {title}")
-            lines.append("")
-
-        # Просроченные задачи
-        overdue_evening = [t for t in pending if t.get("deadline") and
-            (datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ) - now).days < 0]
-        if overdue_evening:
-            lines.append("⏰ *Есть просроченные задачи — возможно, их ещё можно сдать:*")
-            seen_ov = set()
-            for t in overdue_evening[:3]:
-                title = t.get("title", "")
-                if title in seen_ov:
-                    continue
-                seen_ov.add(title)
-                course = t.get("course_name", "")
-                lines.append(f"  ⚠️ {course} — {title}")
+                    when = f"через {days_left} дн."
+                lines.append(f"  • {course} — {title} _({when})_")
             lines.append("")
 
         # Groq анализ
@@ -1616,11 +1596,19 @@ async def send_evening_briefing(bot, chat_id: int):
         except Exception as e:
             print(f"Groq evening analysis error: {e}")
 
-        # Анализ учёбы
+        # Анализ учёбы — коротко, 2 предложения
         try:
-            study = await _get_study_analysis_short()
-            if study:
-                lines.append(f"\n{'─' * 20}\n📊 *УЧЁБА*\n{study}")
+            from parsers.study_analysis import fetch_study_analysis
+            from grok import ask_grok as _ask_grok2
+            raw = await fetch_study_analysis()
+            if raw:
+                study_short = await _ask_grok2(
+                    f"Данные успеваемости студента {USER_NAME}:\n{raw}\n\n"
+                    f"Напиши ровно 2 предложения: лучший предмет и худший. Без воды.",
+                    system="Отвечай строго 2 предложениями на русском."
+                )
+                if study_short:
+                    lines.append(f"\n{'─' * 20}\n📊 *УЧЁБА*\n{study_short}")
         except Exception as e:
             print(f"Evening study analysis error: {e}")
 
@@ -2171,14 +2159,13 @@ async def send_afternoon_reminder(bot, chat_id: int):
                 continue
         with_deadline.sort(key=lambda x: x[0])
 
-        if with_deadline:
-            msg += "\n\n📌 *Ближайшие дедлайны:*"
-            for days, t in with_deadline[:2]:
+        upcoming = [(d, t) for d, t in with_deadline if d >= 0]
+        if upcoming:
+            msg += "\n\n📌 *Ближайшие задачи:*"
+            for days, t in upcoming[:3]:
                 course = t.get("course_name", "")
                 title = t.get("title", "")
-                if days < 0:
-                    when = "просрочено"
-                elif days == 0:
+                if days == 0:
                     when = "сегодня"
                 elif days == 1:
                     when = "завтра"
