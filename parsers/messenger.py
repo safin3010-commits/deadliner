@@ -99,7 +99,7 @@ async def _parse_chat_list(page) -> list[dict]:
     3. Класс 'unread' у родительского элемента
     """
     try:
-        await page.wait_for_selector(CHAT_ITEM_SEL, timeout=8_000)
+        await page.wait_for_selector(CHAT_ITEM_SEL, timeout=20_000)
     except Exception:
         print("  Messenger: список чатов не загрузился")
         return []
@@ -254,7 +254,7 @@ async def _fetch_from_page(context) -> list[dict]:
     loaded = False
     for attempt in range(3):
         try:
-            await page.goto(MESSENGER_URL, wait_until="networkidle", timeout=40_000)
+            await page.goto(MESSENGER_URL, wait_until="domcontentloaded", timeout=40_000)
             loaded = True
             break
         except Exception as e:
@@ -264,7 +264,7 @@ async def _fetch_from_page(context) -> list[dict]:
         print("  Messenger: страница не загрузилась после 3 попыток")
         await page.close()
         return []
-    await page.wait_for_timeout(2_000)
+    await page.wait_for_timeout(5_000)
 
     await _close_popups(page)
     await page.wait_for_timeout(1_000)
