@@ -310,20 +310,18 @@ def main():
             import asyncio as _asyncio
             from parsers.messenger import MESSENGER_URL
             from playwright.async_api import async_playwright
-            def _login_messenger_sync():
-                import json, os, asyncio as _aio
-                async def _inner():
-                    async with async_playwright() as p:
-                        browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
-                        context = await browser.new_context()
-                        page = await context.new_page()
-                        await page.goto(MESSENGER_URL, timeout=30000)
-                        return await context.cookies(), browser
-                cookies, browser = _aio.run(_inner())
-                return cookies
-            print("  Браузер открыт. Войди в Яндекс Мессенджер.")
-            input("  >>> Нажми Enter когда загрузился список чатов: ")
-            cookies = _login_messenger_sync()
+            async def _open_browser():
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
+                    context = await browser.new_context()
+                    page = await context.new_page()
+                    await page.goto(MESSENGER_URL, timeout=30000)
+                    await page.wait_for_timeout(2000)
+                    input("  >>> Нажми Enter когда загрузился список чатов: ")
+                    cookies = await context.cookies()
+                    await browser.close()
+                    return cookies
+            cookies = _asyncio.run(_open_browser())
             import json, os
             os.makedirs("data", exist_ok=True)
             with open("data/cookies_messenger.json", "w") as f:
