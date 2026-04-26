@@ -23,3 +23,9 @@ venv/
 jarvis.py
 start_jarvis.sh
 *.session
+
+# Контент — должен быть в репо
+!data/english_words.json
+!data/english_rules.json
+!data/facts.json
+!data/quotes.json

@@ -1,0 +1,3402 @@
+[
+  {
+    "word": "affect",
+    "transcription": "[əˈfɛkt]",
+    "translation": "влиять, воздействовать"
+  },
+  {
+    "word": "afford",
+    "transcription": "[əˈfɔːrd]",
+    "translation": "позволять себе"
+  },
+  {
+    "word": "afraid",
+    "transcription": "[əˈfreɪd]",
+    "translation": "испуганный, боящийся"
+  },
+  {
+    "word": "aggressive",
+    "transcription": "[əˈɡrɛsɪv]",
+    "translation": "агрессивный"
+  },
+  {
+    "word": "agree",
+    "transcription": "[əˈɡriː]",
+    "translation": "соглашаться"
+  },
+  {
+    "word": "alarm",
+    "transcription": "[əˈlɑːrm]",
+    "translation": "тревога, будильник"
+  },
+  {
+    "word": "allow",
+    "transcription": "[əˈlaʊ]",
+    "translation": "позволять, разрешать"
+  },
+  {
+    "word": "ambitious",
+    "transcription": "[æmˈbɪʃəs]",
+    "translation": "амбициозный, целеустремлённый"
+  },
+  {
+    "word": "ancient",
+    "transcription": "[ˈeɪnʃənt]",
+    "translation": "древний, античный"
+  },
+  {
+    "word": "announce",
+    "transcription": "[əˈnaʊns]",
+    "translation": "объявлять, сообщать"
+  },
+  {
+    "word": "anxiety",
+    "transcription": "[æŋˈzaɪəti]",
+    "translation": "тревога, беспокойство"
+  },
+  {
+    "word": "apologize",
+    "transcription": "[əˈpɒlədʒaɪz]",
+    "translation": "извиняться"
+  },
+  {
+    "word": "appearance",
+    "transcription": "[əˈpɪərəns]",
+    "translation": "внешность, появление"
+  },
+  {
+    "word": "appreciate",
+    "transcription": "[əˈpriːʃieɪt]",
+    "translation": "ценить, быть благодарным"
+  },
+  {
+    "word": "appropriate",
+    "transcription": "[əˈprəʊpriɪt]",
+    "translation": "подходящий, уместный"
+  },
+  {
+    "word": "argue",
+    "transcription": "[ˈɑːrɡjuː]",
+    "translation": "спорить, доказывать"
+  },
+  {
+    "word": "arrange",
+    "transcription": "[əˈreɪndʒ]",
+    "translation": "организовывать, устраивать"
+  },
+  {
+    "word": "assist",
+    "transcription": "[əˈsɪst]",
+    "translation": "помогать, содействовать"
+  },
+  {
+    "word": "assume",
+    "transcription": "[əˈsjuːm]",
+    "translation": "предполагать, допускать"
+  },
+  {
+    "word": "attach",
+    "transcription": "[əˈtætʃ]",
+    "translation": "прикреплять, присоединять"
+  },
+  {
+    "word": "attitude",
+    "transcription": "[ˈætɪtjuːd]",
+    "translation": "отношение, позиция"
+  },
+  {
+    "word": "attractive",
+    "transcription": "[əˈtræktɪv]",
+    "translation": "привлекательный"
+  },
+  {
+    "word": "avoid",
+    "transcription": "[əˈvɔɪd]",
+    "translation": "избегать"
+  },
+  {
+    "word": "aware",
+    "transcription": "[əˈwɛər]",
+    "translation": "осознающий, знающий"
+  },
+  {
+    "word": "awful",
+    "transcription": "[ˈɔːfəl]",
+    "translation": "ужасный, отвратительный"
+  },
+  {
+    "word": "background",
+    "transcription": "[ˈbækɡraʊnd]",
+    "translation": "фон, происхождение"
+  },
+  {
+    "word": "balance",
+    "transcription": "[ˈbæləns]",
+    "translation": "баланс, равновесие"
+  },
+  {
+    "word": "barrier",
+    "transcription": "[ˈbæriər]",
+    "translation": "барьер, препятствие"
+  },
+  {
+    "word": "behave",
+    "transcription": "[bɪˈheɪv]",
+    "translation": "вести себя"
+  },
+  {
+    "word": "believe",
+    "transcription": "[bɪˈliːv]",
+    "translation": "верить, считать"
+  },
+  {
+    "word": "benefit",
+    "transcription": "[ˈbɛnɪfɪt]",
+    "translation": "польза, выгода"
+  },
+  {
+    "word": "blame",
+    "transcription": "[bleɪm]",
+    "translation": "обвинять, винить"
+  },
+  {
+    "word": "brave",
+    "transcription": "[breɪv]",
+    "translation": "храбрый, смелый"
+  },
+  {
+    "word": "breathe",
+    "transcription": "[briːð]",
+    "translation": "дышать"
+  },
+  {
+    "word": "burden",
+    "transcription": "[ˈbɜːrdən]",
+    "translation": "бремя, груз"
+  },
+  {
+    "word": "calm",
+    "transcription": "[kɑːm]",
+    "translation": "спокойный, умиротворённый"
+  },
+  {
+    "word": "capable",
+    "transcription": "[ˈkeɪpəbəl]",
+    "translation": "способный, умелый"
+  },
+  {
+    "word": "career",
+    "transcription": "[kəˈrɪər]",
+    "translation": "карьера, профессия"
+  },
+  {
+    "word": "careful",
+    "transcription": "[ˈkɛərfəl]",
+    "translation": "осторожный, внимательный"
+  },
+  {
+    "word": "cause",
+    "transcription": "[kɔːz]",
+    "translation": "причина, вызывать"
+  },
+  {
+    "word": "celebrate",
+    "transcription": "[ˈsɛlɪbreɪt]",
+    "translation": "праздновать, отмечать"
+  },
+  {
+    "word": "challenge",
+    "transcription": "[ˈtʃælɪndʒ]",
+    "translation": "вызов, испытание"
+  },
+  {
+    "word": "chance",
+    "transcription": "[tʃɑːns]",
+    "translation": "шанс, возможность"
+  },
+  {
+    "word": "character",
+    "transcription": "[ˈkærɪktər]",
+    "translation": "характер, персонаж"
+  },
+  {
+    "word": "charge",
+    "transcription": "[tʃɑːrdʒ]",
+    "translation": "заряд, плата, обвинение"
+  },
+  {
+    "word": "cheerful",
+    "transcription": "[ˈtʃɪərfəl]",
+    "translation": "радостный, весёлый"
+  },
+  {
+    "word": "choice",
+    "transcription": "[tʃɔɪs]",
+    "translation": "выбор"
+  },
+  {
+    "word": "citizen",
+    "transcription": "[ˈsɪtɪzən]",
+    "translation": "гражданин, житель"
+  },
+  {
+    "word": "claim",
+    "transcription": "[kleɪm]",
+    "translation": "утверждать, требовать"
+  },
+  {
+    "word": "clever",
+    "transcription": "[ˈklɛvər]",
+    "translation": "умный, сообразительный"
+  },
+  {
+    "word": "collect",
+    "transcription": "[kəˈlɛkt]",
+    "translation": "собирать, коллекционировать"
+  },
+  {
+    "word": "comfortable",
+    "transcription": "[ˈkʌmftəbəl]",
+    "translation": "удобный, комфортный"
+  },
+  {
+    "word": "communicate",
+    "transcription": "[kəˈmjuːnɪkeɪt]",
+    "translation": "общаться, сообщать"
+  },
+  {
+    "word": "community",
+    "transcription": "[kəˈmjuːnɪti]",
+    "translation": "сообщество, община"
+  },
+  {
+    "word": "compare",
+    "transcription": "[kəmˈpɛər]",
+    "translation": "сравнивать"
+  },
+  {
+    "word": "compete",
+    "transcription": "[kəmˈpiːt]",
+    "translation": "соревноваться, конкурировать"
+  },
+  {
+    "word": "complain",
+    "transcription": "[kəmˈpleɪn]",
+    "translation": "жаловаться"
+  },
+  {
+    "word": "complete",
+    "transcription": "[kəmˈpliːt]",
+    "translation": "завершать, полный"
+  },
+  {
+    "word": "concentrate",
+    "transcription": "[ˈkɒnsəntreɪt]",
+    "translation": "концентрироваться, сосредотачиваться"
+  },
+  {
+    "word": "confidence",
+    "transcription": "[ˈkɒnfɪdəns]",
+    "translation": "уверенность, доверие"
+  },
+  {
+    "word": "conflict",
+    "transcription": "[ˈkɒnflɪkt]",
+    "translation": "конфликт, противоречие"
+  },
+  {
+    "word": "confuse",
+    "transcription": "[kənˈfjuːz]",
+    "translation": "путать, сбивать с толку"
+  },
+  {
+    "word": "connect",
+    "transcription": "[kəˈnɛkt]",
+    "translation": "соединять, связывать"
+  },
+  {
+    "word": "consider",
+    "transcription": "[kənˈsɪdər]",
+    "translation": "рассматривать, считать"
+  },
+  {
+    "word": "consist",
+    "transcription": "[kənˈsɪst]",
+    "translation": "состоять, заключаться"
+  },
+  {
+    "word": "contain",
+    "transcription": "[kənˈteɪn]",
+    "translation": "содержать, включать"
+  },
+  {
+    "word": "continue",
+    "transcription": "[kənˈtɪnjuː]",
+    "translation": "продолжать"
+  },
+  {
+    "word": "contribute",
+    "transcription": "[kənˈtrɪbjuːt]",
+    "translation": "вносить вклад, способствовать"
+  },
+  {
+    "word": "convenient",
+    "transcription": "[kənˈviːniənt]",
+    "translation": "удобный, подходящий"
+  },
+  {
+    "word": "convince",
+    "transcription": "[kənˈvɪns]",
+    "translation": "убеждать"
+  },
+  {
+    "word": "courage",
+    "transcription": "[ˈkʌrɪdʒ]",
+    "translation": "смелость, храбрость"
+  },
+  {
+    "word": "creative",
+    "transcription": "[kriˈeɪtɪv]",
+    "translation": "творческий, креативный"
+  },
+  {
+    "word": "cruel",
+    "transcription": "[ˈkruːəl]",
+    "translation": "жестокий, безжалостный"
+  },
+  {
+    "word": "curious",
+    "transcription": "[ˈkjʊəriəs]",
+    "translation": "любопытный, интересный"
+  },
+  {
+    "word": "custom",
+    "transcription": "[ˈkʌstəm]",
+    "translation": "обычай, традиция"
+  },
+  {
+    "word": "damage",
+    "transcription": "[ˈdæmɪdʒ]",
+    "translation": "ущерб, повреждение"
+  },
+  {
+    "word": "danger",
+    "transcription": "[ˈdeɪndʒər]",
+    "translation": "опасность"
+  },
+  {
+    "word": "deadline",
+    "transcription": "[ˈdɛdlaɪn]",
+    "translation": "крайний срок, дедлайн"
+  },
+  {
+    "word": "deal",
+    "transcription": "[diːl]",
+    "translation": "сделка, справляться"
+  },
+  {
+    "word": "debate",
+    "transcription": "[dɪˈbeɪt]",
+    "translation": "дебаты, обсуждать"
+  },
+  {
+    "word": "decide",
+    "transcription": "[dɪˈsaɪd]",
+    "translation": "решать, принимать решение"
+  },
+  {
+    "word": "declare",
+    "transcription": "[dɪˈklɛər]",
+    "translation": "объявлять, заявлять"
+  },
+  {
+    "word": "decrease",
+    "transcription": "[dɪˈkriːs]",
+    "translation": "уменьшать, снижаться"
+  },
+  {
+    "word": "defeat",
+    "transcription": "[dɪˈfiːt]",
+    "translation": "победить, поражение"
+  },
+  {
+    "word": "defend",
+    "transcription": "[dɪˈfɛnd]",
+    "translation": "защищать, отстаивать"
+  },
+  {
+    "word": "delay",
+    "transcription": "[dɪˈleɪ]",
+    "translation": "задержка, откладывать"
+  },
+  {
+    "word": "deliver",
+    "transcription": "[dɪˈlɪvər]",
+    "translation": "доставлять, произносить"
+  },
+  {
+    "word": "demand",
+    "transcription": "[dɪˈmɑːnd]",
+    "translation": "требование, спрос"
+  },
+  {
+    "word": "depend",
+    "transcription": "[dɪˈpɛnd]",
+    "translation": "зависеть, полагаться"
+  },
+  {
+    "word": "describe",
+    "transcription": "[dɪˈskraɪb]",
+    "translation": "описывать"
+  },
+  {
+    "word": "deserve",
+    "transcription": "[dɪˈzɜːrv]",
+    "translation": "заслуживать"
+  },
+  {
+    "word": "desire",
+    "transcription": "[dɪˈzaɪər]",
+    "translation": "желание, стремление"
+  },
+  {
+    "word": "destroy",
+    "transcription": "[dɪˈstrɔɪ]",
+    "translation": "разрушать, уничтожать"
+  },
+  {
+    "word": "develop",
+    "transcription": "[dɪˈvɛləp]",
+    "translation": "развивать, разрабатывать"
+  },
+  {
+    "word": "difference",
+    "transcription": "[ˈdɪfərəns]",
+    "translation": "разница, отличие"
+  },
+  {
+    "word": "difficult",
+    "transcription": "[ˈdɪfɪkəlt]",
+    "translation": "сложный, трудный"
+  },
+  {
+    "word": "direction",
+    "transcription": "[dɪˈrɛkʃən]",
+    "translation": "направление, руководство"
+  },
+  {
+    "word": "disappear",
+    "transcription": "[ˌdɪsəˈpɪər]",
+    "translation": "исчезать"
+  },
+  {
+    "word": "disappoint",
+    "transcription": "[ˌdɪsəˈpɔɪnt]",
+    "translation": "разочаровывать"
+  },
+  {
+    "word": "discover",
+    "transcription": "[dɪˈskʌvər]",
+    "translation": "открывать, обнаруживать"
+  },
+  {
+    "word": "discuss",
+    "transcription": "[dɪˈskʌs]",
+    "translation": "обсуждать"
+  },
+  {
+    "word": "distance",
+    "transcription": "[ˈdɪstəns]",
+    "translation": "расстояние, дистанция"
+  },
+  {
+    "word": "disturb",
+    "transcription": "[dɪˈstɜːrb]",
+    "translation": "беспокоить, мешать"
+  },
+  {
+    "word": "divide",
+    "transcription": "[dɪˈvaɪd]",
+    "translation": "делить, разделять"
+  },
+  {
+    "word": "doubt",
+    "transcription": "[daʊt]",
+    "translation": "сомнение, сомневаться"
+  },
+  {
+    "word": "dream",
+    "transcription": "[driːm]",
+    "translation": "мечта, сон, мечтать"
+  },
+  {
+    "word": "drive",
+    "transcription": "[draɪv]",
+    "translation": "водить, двигать, стремление"
+  },
+  {
+    "word": "eager",
+    "transcription": "[ˈiːɡər]",
+    "translation": "стремящийся, горящий желанием"
+  },
+  {
+    "word": "earn",
+    "transcription": "[ɜːrn]",
+    "translation": "зарабатывать, заслуживать"
+  },
+  {
+    "word": "efficient",
+    "transcription": "[ɪˈfɪʃənt]",
+    "translation": "эффективный, продуктивный"
+  },
+  {
+    "word": "effort",
+    "transcription": "[ˈɛfərt]",
+    "translation": "усилие, попытка"
+  },
+  {
+    "word": "embarrass",
+    "transcription": "[ɪmˈbærəs]",
+    "translation": "смущать, ставить в неловкое положение"
+  },
+  {
+    "word": "emotion",
+    "transcription": "[ɪˈməʊʃən]",
+    "translation": "эмоция, чувство"
+  },
+  {
+    "word": "encourage",
+    "transcription": "[ɪnˈkʌrɪdʒ]",
+    "translation": "поощрять, поддерживать"
+  },
+  {
+    "word": "energy",
+    "transcription": "[ˈɛnədʒi]",
+    "translation": "энергия, сила"
+  },
+  {
+    "word": "enjoy",
+    "transcription": "[ɪnˈdʒɔɪ]",
+    "translation": "наслаждаться, получать удовольствие"
+  },
+  {
+    "word": "enormous",
+    "transcription": "[ɪˈnɔːrməs]",
+    "translation": "огромный, гигантский"
+  },
+  {
+    "word": "environment",
+    "transcription": "[ɪnˈvaɪrənmənt]",
+    "translation": "окружающая среда, обстановка"
+  },
+  {
+    "word": "escape",
+    "transcription": "[ɪˈskeɪp]",
+    "translation": "побег, убегать"
+  },
+  {
+    "word": "essential",
+    "transcription": "[ɪˈsɛnʃəl]",
+    "translation": "существенный, необходимый"
+  },
+  {
+    "word": "establish",
+    "transcription": "[ɪˈstæblɪʃ]",
+    "translation": "устанавливать, основывать"
+  },
+  {
+    "word": "examine",
+    "transcription": "[ɪɡˈzæmɪn]",
+    "translation": "исследовать, проверять"
+  },
+  {
+    "word": "excellent",
+    "transcription": "[ˈɛksələnt]",
+    "translation": "отличный, превосходный"
+  },
+  {
+    "word": "exist",
+    "transcription": "[ɪɡˈzɪst]",
+    "translation": "существовать"
+  },
+  {
+    "word": "expect",
+    "transcription": "[ɪkˈspɛkt]",
+    "translation": "ожидать, предполагать"
+  },
+  {
+    "word": "experience",
+    "transcription": "[ɪkˈspɪəriəns]",
+    "translation": "опыт, переживать"
+  },
+  {
+    "word": "explain",
+    "transcription": "[ɪkˈspleɪn]",
+    "translation": "объяснять"
+  },
+  {
+    "word": "express",
+    "transcription": "[ɪkˈsprɛs]",
+    "translation": "выражать"
+  },
+  {
+    "word": "failure",
+    "transcription": "[ˈfeɪljər]",
+    "translation": "неудача, провал"
+  },
+  {
+    "word": "fair",
+    "transcription": "[fɛər]",
+    "translation": "справедливый, честный"
+  },
+  {
+    "word": "familiar",
+    "transcription": "[fəˈmɪliər]",
+    "translation": "знакомый, привычный"
+  },
+  {
+    "word": "fantastic",
+    "transcription": "[fænˈtæstɪk]",
+    "translation": "фантастический, великолепный"
+  },
+  {
+    "word": "fault",
+    "transcription": "[fɔːlt]",
+    "translation": "ошибка, вина, недостаток"
+  },
+  {
+    "word": "fear",
+    "transcription": "[fɪər]",
+    "translation": "страх, бояться"
+  },
+  {
+    "word": "flexible",
+    "transcription": "[ˈflɛksɪbəl]",
+    "translation": "гибкий, адаптивный"
+  },
+  {
+    "word": "focus",
+    "transcription": "[ˈfəʊkəs]",
+    "translation": "фокус, сосредотачиваться"
+  },
+  {
+    "word": "forbid",
+    "transcription": "[fəˈbɪd]",
+    "translation": "запрещать"
+  },
+  {
+    "word": "foreign",
+    "transcription": "[ˈfɒrɪn]",
+    "translation": "иностранный, зарубежный"
+  },
+  {
+    "word": "forgive",
+    "transcription": "[fəˈɡɪv]",
+    "translation": "прощать"
+  },
+  {
+    "word": "fortunate",
+    "transcription": "[ˈfɔːrtʃənɪt]",
+    "translation": "удачливый, счастливый"
+  },
+  {
+    "word": "freedom",
+    "transcription": "[ˈfriːdəm]",
+    "translation": "свобода"
+  },
+  {
+    "word": "frustrate",
+    "transcription": "[frʌˈstreɪt]",
+    "translation": "расстраивать, разочаровывать"
+  },
+  {
+    "word": "fulfil",
+    "transcription": "[fʊlˈfɪl]",
+    "translation": "выполнять, исполнять"
+  },
+  {
+    "word": "fundamental",
+    "transcription": "[ˌfʌndəˈmɛntəl]",
+    "translation": "фундаментальный, основной"
+  },
+  {
+    "word": "generous",
+    "transcription": "[ˈdʒɛnərəs]",
+    "translation": "щедрый, великодушный"
+  },
+  {
+    "word": "genuine",
+    "transcription": "[ˈdʒɛnjuɪn]",
+    "translation": "настоящий, искренний"
+  },
+  {
+    "word": "global",
+    "transcription": "[ˈɡləʊbəl]",
+    "translation": "глобальный, мировой"
+  },
+  {
+    "word": "goal",
+    "transcription": "[ɡəʊl]",
+    "translation": "цель, гол"
+  },
+  {
+    "word": "grateful",
+    "transcription": "[ˈɡreɪtfəl]",
+    "translation": "благодарный"
+  },
+  {
+    "word": "growth",
+    "transcription": "[ɡrəʊθ]",
+    "translation": "рост, развитие"
+  },
+  {
+    "word": "guide",
+    "transcription": "[ɡaɪd]",
+    "translation": "гид, руководить"
+  },
+  {
+    "word": "guilty",
+    "transcription": "[ˈɡɪlti]",
+    "translation": "виновный"
+  },
+  {
+    "word": "habit",
+    "transcription": "[ˈhæbɪt]",
+    "translation": "привычка"
+  },
+  {
+    "word": "handle",
+    "transcription": "[ˈhændəl]",
+    "translation": "справляться, ручка"
+  },
+  {
+    "word": "happen",
+    "transcription": "[ˈhæpən]",
+    "translation": "случаться, происходить"
+  },
+  {
+    "word": "harmful",
+    "transcription": "[ˈhɑːrmfəl]",
+    "translation": "вредный, опасный"
+  },
+  {
+    "word": "honest",
+    "transcription": "[ˈɒnɪst]",
+    "translation": "честный"
+  },
+  {
+    "word": "hopeful",
+    "transcription": "[ˈhəʊpfəl]",
+    "translation": "полный надежды, обнадёживающий"
+  },
+  {
+    "word": "horrible",
+    "transcription": "[ˈhɒrɪbəl]",
+    "translation": "ужасный, страшный"
+  },
+  {
+    "word": "huge",
+    "transcription": "[hjuːdʒ]",
+    "translation": "огромный, громадный"
+  },
+  {
+    "word": "humble",
+    "transcription": "[ˈhʌmbəl]",
+    "translation": "скромный, смиренный"
+  },
+  {
+    "word": "identify",
+    "transcription": "[aɪˈdɛntɪfaɪ]",
+    "translation": "определять, устанавливать"
+  },
+  {
+    "word": "ignore",
+    "transcription": "[ɪɡˈnɔːr]",
+    "translation": "игнорировать, не замечать"
+  },
+  {
+    "word": "imagine",
+    "transcription": "[ɪˈmædʒɪn]",
+    "translation": "воображать, представлять"
+  },
+  {
+    "word": "improve",
+    "transcription": "[ɪmˈpruːv]",
+    "translation": "улучшать, совершенствовать"
+  },
+  {
+    "word": "include",
+    "transcription": "[ɪnˈkluːd]",
+    "translation": "включать, содержать"
+  },
+  {
+    "word": "increase",
+    "transcription": "[ɪnˈkriːs]",
+    "translation": "увеличивать, рост"
+  },
+  {
+    "word": "independent",
+    "transcription": "[ˌɪndɪˈpɛndənt]",
+    "translation": "независимый, самостоятельный"
+  },
+  {
+    "word": "influence",
+    "transcription": "[ˈɪnfluəns]",
+    "translation": "влияние, воздействовать"
+  },
+  {
+    "word": "inform",
+    "transcription": "[ɪnˈfɔːrm]",
+    "translation": "информировать, сообщать"
+  },
+  {
+    "word": "inspire",
+    "transcription": "[ɪnˈspaɪər]",
+    "translation": "вдохновлять"
+  },
+  {
+    "word": "intelligent",
+    "transcription": "[ɪnˈtɛlɪdʒənt]",
+    "translation": "умный, интеллектуальный"
+  },
+  {
+    "word": "intention",
+    "transcription": "[ɪnˈtɛnʃən]",
+    "translation": "намерение, цель"
+  },
+  {
+    "word": "interest",
+    "transcription": "[ˈɪntrɪst]",
+    "translation": "интерес, процент"
+  },
+  {
+    "word": "introduce",
+    "transcription": "[ˌɪntrəˈdjuːs]",
+    "translation": "представлять, вводить"
+  },
+  {
+    "word": "investigate",
+    "transcription": "[ɪnˈvɛstɪɡeɪt]",
+    "translation": "расследовать, изучать"
+  },
+  {
+    "word": "involve",
+    "transcription": "[ɪnˈvɒlv]",
+    "translation": "вовлекать, включать"
+  },
+  {
+    "word": "issue",
+    "transcription": "[ˈɪʃuː]",
+    "translation": "проблема, вопрос, выпуск"
+  },
+  {
+    "word": "jealous",
+    "transcription": "[ˈdʒɛləs]",
+    "translation": "ревнивый, завистливый"
+  },
+  {
+    "word": "journey",
+    "transcription": "[ˈdʒɜːrni]",
+    "translation": "путешествие, путь"
+  },
+  {
+    "word": "judge",
+    "transcription": "[dʒʌdʒ]",
+    "translation": "судить, оценивать, судья"
+  },
+  {
+    "word": "justify",
+    "transcription": "[ˈdʒʌstɪfaɪ]",
+    "translation": "оправдывать, обосновывать"
+  },
+  {
+    "word": "keen",
+    "transcription": "[kiːn]",
+    "translation": "заинтересованный, острый"
+  },
+  {
+    "word": "knowledge",
+    "transcription": "[ˈnɒlɪdʒ]",
+    "translation": "знание, осведомлённость"
+  },
+  {
+    "word": "lack",
+    "transcription": "[læk]",
+    "translation": "нехватка, недостаток"
+  },
+  {
+    "word": "launch",
+    "transcription": "[lɔːntʃ]",
+    "translation": "запускать, начинать"
+  },
+  {
+    "word": "lead",
+    "transcription": "[liːd]",
+    "translation": "вести, руководить"
+  },
+  {
+    "word": "limit",
+    "transcription": "[ˈlɪmɪt]",
+    "translation": "ограничение, предел"
+  },
+  {
+    "word": "logical",
+    "transcription": "[ˈlɒdʒɪkəl]",
+    "translation": "логичный, разумный"
+  },
+  {
+    "word": "lonely",
+    "transcription": "[ˈləʊnli]",
+    "translation": "одинокий, уединённый"
+  },
+  {
+    "word": "loyal",
+    "transcription": "[ˈlɔɪəl]",
+    "translation": "верный, преданный"
+  },
+  {
+    "word": "manage",
+    "transcription": "[ˈmænɪdʒ]",
+    "translation": "управлять, справляться"
+  },
+  {
+    "word": "meaningful",
+    "transcription": "[ˈmiːnɪŋfəl]",
+    "translation": "значимый, осмысленный"
+  },
+  {
+    "word": "mention",
+    "transcription": "[ˈmɛnʃən]",
+    "translation": "упоминать, ссылаться"
+  },
+  {
+    "word": "method",
+    "transcription": "[ˈmɛθəd]",
+    "translation": "метод, способ"
+  },
+  {
+    "word": "mistake",
+    "transcription": "[mɪˈsteɪk]",
+    "translation": "ошибка, заблуждение"
+  },
+  {
+    "word": "motivate",
+    "transcription": "[ˈməʊtɪveɪt]",
+    "translation": "мотивировать, побуждать"
+  },
+  {
+    "word": "mysterious",
+    "transcription": "[mɪˈstɪəriəs]",
+    "translation": "таинственный, загадочный"
+  },
+  {
+    "word": "natural",
+    "transcription": "[ˈnætʃərəl]",
+    "translation": "естественный, природный"
+  },
+  {
+    "word": "negative",
+    "transcription": "[ˈnɛɡətɪv]",
+    "translation": "отрицательный, негативный"
+  },
+  {
+    "word": "nervous",
+    "transcription": "[ˈnɜːrvəs]",
+    "translation": "нервный, беспокойный"
+  },
+  {
+    "word": "notice",
+    "transcription": "[ˈnəʊtɪs]",
+    "translation": "замечать, уведомление"
+  },
+  {
+    "word": "obvious",
+    "transcription": "[ˈɒbviəs]",
+    "translation": "очевидный, явный"
+  },
+  {
+    "word": "offer",
+    "transcription": "[ˈɒfər]",
+    "translation": "предлагать, предложение"
+  },
+  {
+    "word": "opportunity",
+    "transcription": "[ˌɒpəˈtjuːnɪti]",
+    "translation": "возможность, шанс"
+  },
+  {
+    "word": "organize",
+    "transcription": "[ˈɔːrɡənaɪz]",
+    "translation": "организовывать"
+  },
+  {
+    "word": "overcome",
+    "transcription": "[ˌəʊvəˈkʌm]",
+    "translation": "преодолевать, побеждать"
+  },
+  {
+    "word": "particular",
+    "transcription": "[pəˈtɪkjələr]",
+    "translation": "особый, конкретный"
+  },
+  {
+    "word": "patient",
+    "transcription": "[ˈpeɪʃənt]",
+    "translation": "терпеливый, пациент"
+  },
+  {
+    "word": "perform",
+    "transcription": "[pəˈfɔːrm]",
+    "translation": "выполнять, выступать"
+  },
+  {
+    "word": "permit",
+    "transcription": "[pəˈmɪt]",
+    "translation": "разрешать, позволять"
+  },
+  {
+    "word": "persistent",
+    "transcription": "[pəˈsɪstənt]",
+    "translation": "настойчивый, упорный"
+  },
+  {
+    "word": "popular",
+    "transcription": "[ˈpɒpjələr]",
+    "translation": "популярный, известный"
+  },
+  {
+    "word": "positive",
+    "transcription": "[ˈpɒzɪtɪv]",
+    "translation": "положительный, позитивный"
+  },
+  {
+    "word": "powerful",
+    "transcription": "[ˈpaʊərfəl]",
+    "translation": "мощный, влиятельный"
+  },
+  {
+    "word": "practical",
+    "transcription": "[ˈpræktɪkəl]",
+    "translation": "практичный, прикладной"
+  },
+  {
+    "word": "predict",
+    "transcription": "[prɪˈdɪkt]",
+    "translation": "предсказывать, прогнозировать"
+  },
+  {
+    "word": "prepare",
+    "transcription": "[prɪˈpɛər]",
+    "translation": "готовить, подготавливать"
+  },
+  {
+    "word": "prevent",
+    "transcription": "[prɪˈvɛnt]",
+    "translation": "предотвращать, мешать"
+  },
+  {
+    "word": "productive",
+    "transcription": "[prəˈdʌktɪv]",
+    "translation": "продуктивный, плодотворный"
+  },
+  {
+    "word": "progress",
+    "transcription": "[ˈprəʊɡrɛs]",
+    "translation": "прогресс, развитие"
+  },
+  {
+    "word": "promote",
+    "transcription": "[prəˈməʊt]",
+    "translation": "продвигать, повышать"
+  },
+  {
+    "word": "protect",
+    "transcription": "[prəˈtɛkt]",
+    "translation": "защищать, охранять"
+  },
+  {
+    "word": "proud",
+    "transcription": "[praʊd]",
+    "translation": "гордый"
+  },
+  {
+    "word": "provide",
+    "transcription": "[prəˈvaɪd]",
+    "translation": "обеспечивать, предоставлять"
+  },
+  {
+    "word": "purpose",
+    "transcription": "[ˈpɜːrpəs]",
+    "translation": "цель, назначение"
+  },
+  {
+    "word": "quality",
+    "transcription": "[ˈkwɒlɪti]",
+    "translation": "качество, свойство"
+  },
+  {
+    "word": "realize",
+    "transcription": "[ˈrɪəlaɪz]",
+    "translation": "осознавать, понимать"
+  },
+  {
+    "word": "reason",
+    "transcription": "[ˈriːzən]",
+    "translation": "причина, разум"
+  },
+  {
+    "word": "recognize",
+    "transcription": "[ˈrɛkəɡnaɪz]",
+    "translation": "признавать, узнавать"
+  },
+  {
+    "word": "recommend",
+    "transcription": "[ˌrɛkəˈmɛnd]",
+    "translation": "рекомендовать, советовать"
+  },
+  {
+    "word": "reduce",
+    "transcription": "[rɪˈdjuːs]",
+    "translation": "уменьшать, сокращать"
+  },
+  {
+    "word": "reflect",
+    "transcription": "[rɪˈflɛkt]",
+    "translation": "отражать, размышлять"
+  },
+  {
+    "word": "refuse",
+    "transcription": "[rɪˈfjuːz]",
+    "translation": "отказывать, отвергать"
+  },
+  {
+    "word": "regret",
+    "transcription": "[rɪˈɡrɛt]",
+    "translation": "сожалеть, сожаление"
+  },
+  {
+    "word": "relationship",
+    "transcription": "[rɪˈleɪʃənʃɪp]",
+    "translation": "отношения, связь"
+  },
+  {
+    "word": "reliable",
+    "transcription": "[rɪˈlaɪəbəl]",
+    "translation": "надёжный, заслуживающий доверия"
+  },
+  {
+    "word": "represent",
+    "transcription": "[ˌrɛprɪˈzɛnt]",
+    "translation": "представлять, символизировать"
+  },
+  {
+    "word": "require",
+    "transcription": "[rɪˈkwaɪər]",
+    "translation": "требовать, нуждаться"
+  },
+  {
+    "word": "research",
+    "transcription": "[rɪˈsɜːrtʃ]",
+    "translation": "исследование, изучать"
+  },
+  {
+    "word": "respect",
+    "transcription": "[rɪˈspɛkt]",
+    "translation": "уважение, уважать"
+  },
+  {
+    "word": "responsible",
+    "transcription": "[rɪˈspɒnsɪbəl]",
+    "translation": "ответственный"
+  },
+  {
+    "word": "reveal",
+    "transcription": "[rɪˈviːl]",
+    "translation": "раскрывать, обнаруживать"
+  },
+  {
+    "word": "reward",
+    "transcription": "[rɪˈwɔːrd]",
+    "translation": "награда, вознаграждать"
+  },
+  {
+    "word": "risk",
+    "transcription": "[rɪsk]",
+    "translation": "риск, рисковать"
+  },
+  {
+    "word": "role",
+    "transcription": "[rəʊl]",
+    "translation": "роль, функция"
+  },
+  {
+    "word": "routine",
+    "transcription": "[ruːˈtiːn]",
+    "translation": "распорядок, рутина"
+  },
+  {
+    "word": "satisfy",
+    "transcription": "[ˈsætɪsfaɪ]",
+    "translation": "удовлетворять, выполнять"
+  },
+  {
+    "word": "scared",
+    "transcription": "[skɛərd]",
+    "translation": "напуганный, испуганный"
+  },
+  {
+    "word": "schedule",
+    "transcription": "[ˈʃɛdjuːl]",
+    "translation": "расписание, планировать"
+  },
+  {
+    "word": "sensitive",
+    "transcription": "[ˈsɛnsɪtɪv]",
+    "translation": "чувствительный, деликатный"
+  },
+  {
+    "word": "serious",
+    "transcription": "[ˈsɪəriəs]",
+    "translation": "серьёзный, важный"
+  },
+  {
+    "word": "share",
+    "transcription": "[ʃɛər]",
+    "translation": "делиться, доля"
+  },
+  {
+    "word": "significant",
+    "transcription": "[sɪɡˈnɪfɪkənt]",
+    "translation": "значительный, существенный"
+  },
+  {
+    "word": "similar",
+    "transcription": "[ˈsɪmɪlər]",
+    "translation": "похожий, схожий"
+  },
+  {
+    "word": "situation",
+    "transcription": "[ˌsɪtʃuˈeɪʃən]",
+    "translation": "ситуация, положение"
+  },
+  {
+    "word": "skill",
+    "transcription": "[skɪl]",
+    "translation": "навык, умение"
+  },
+  {
+    "word": "solution",
+    "transcription": "[səˈluːʃən]",
+    "translation": "решение, выход"
+  },
+  {
+    "word": "source",
+    "transcription": "[sɔːrs]",
+    "translation": "источник, начало"
+  },
+  {
+    "word": "specific",
+    "transcription": "[spəˈsɪfɪk]",
+    "translation": "конкретный, специфический"
+  },
+  {
+    "word": "spirit",
+    "transcription": "[ˈspɪrɪt]",
+    "translation": "дух, энергия"
+  },
+  {
+    "word": "strategy",
+    "transcription": "[ˈstrætɪdʒi]",
+    "translation": "стратегия, план"
+  },
+  {
+    "word": "strength",
+    "transcription": "[strɛŋθ]",
+    "translation": "сила, прочность"
+  },
+  {
+    "word": "stress",
+    "transcription": "[strɛs]",
+    "translation": "стресс, давление"
+  },
+  {
+    "word": "struggle",
+    "transcription": "[ˈstrʌɡəl]",
+    "translation": "бороться, борьба"
+  },
+  {
+    "word": "succeed",
+    "transcription": "[səkˈsiːd]",
+    "translation": "добиться успеха, преуспеть"
+  },
+  {
+    "word": "suggest",
+    "transcription": "[səˈdʒɛst]",
+    "translation": "предлагать, советовать"
+  },
+  {
+    "word": "support",
+    "transcription": "[səˈpɔːrt]",
+    "translation": "поддержка, поддерживать"
+  },
+  {
+    "word": "suppose",
+    "transcription": "[səˈpəʊz]",
+    "translation": "предполагать, думать"
+  },
+  {
+    "word": "survive",
+    "transcription": "[səˈvaɪv]",
+    "translation": "выживать, пережить"
+  },
+  {
+    "word": "talent",
+    "transcription": "[ˈtælənt]",
+    "translation": "талант, способность"
+  },
+  {
+    "word": "task",
+    "transcription": "[tɑːsk]",
+    "translation": "задача, задание"
+  },
+  {
+    "word": "temporary",
+    "transcription": "[ˈtɛmpərəri]",
+    "translation": "временный"
+  },
+  {
+    "word": "tend",
+    "transcription": "[tɛnd]",
+    "translation": "иметь тенденцию, ухаживать"
+  },
+  {
+    "word": "terrible",
+    "transcription": "[ˈtɛrɪbəl]",
+    "translation": "ужасный, страшный"
+  },
+  {
+    "word": "thorough",
+    "transcription": "[ˈθʌrə]",
+    "translation": "тщательный, основательный"
+  },
+  {
+    "word": "threaten",
+    "transcription": "[ˈθrɛtən]",
+    "translation": "угрожать"
+  },
+  {
+    "word": "throughout",
+    "transcription": "[θruːˈaʊt]",
+    "translation": "на протяжении, повсюду"
+  },
+  {
+    "word": "tidy",
+    "transcription": "[ˈtaɪdi]",
+    "translation": "аккуратный, убирать"
+  },
+  {
+    "word": "tiny",
+    "transcription": "[ˈtaɪni]",
+    "translation": "крошечный, маленький"
+  },
+  {
+    "word": "tolerate",
+    "transcription": "[ˈtɒləreɪt]",
+    "translation": "терпеть, переносить"
+  },
+  {
+    "word": "tradition",
+    "transcription": "[trəˈdɪʃən]",
+    "translation": "традиция, обычай"
+  },
+  {
+    "word": "trust",
+    "transcription": "[trʌst]",
+    "translation": "доверие, доверять"
+  },
+  {
+    "word": "typical",
+    "transcription": "[ˈtɪpɪkəl]",
+    "translation": "типичный, характерный"
+  },
+  {
+    "word": "unique",
+    "transcription": "[juːˈniːk]",
+    "translation": "уникальный, неповторимый"
+  },
+  {
+    "word": "useful",
+    "transcription": "[ˈjuːsfəl]",
+    "translation": "полезный"
+  },
+  {
+    "word": "valuable",
+    "transcription": "[ˈvæljuəbəl]",
+    "translation": "ценный, дорогостоящий"
+  },
+  {
+    "word": "variety",
+    "transcription": "[vəˈraɪəti]",
+    "translation": "разнообразие, вид"
+  },
+  {
+    "word": "volunteer",
+    "transcription": "[ˌvɒlənˈtɪər]",
+    "translation": "волонтёр, добровольно"
+  },
+  {
+    "word": "vulnerable",
+    "transcription": "[ˈvʌlnərəbəl]",
+    "translation": "уязвимый, незащищённый"
+  },
+  {
+    "word": "waste",
+    "transcription": "[weɪst]",
+    "translation": "тратить впустую, отходы"
+  },
+  {
+    "word": "wealth",
+    "transcription": "[wɛlθ]",
+    "translation": "богатство, состояние"
+  },
+  {
+    "word": "willing",
+    "transcription": "[ˈwɪlɪŋ]",
+    "translation": "готовый, желающий"
+  },
+  {
+    "word": "wisdom",
+    "transcription": "[ˈwɪzdəm]",
+    "translation": "мудрость"
+  },
+  {
+    "word": "wonder",
+    "transcription": "[ˈwʌndər]",
+    "translation": "удивляться, чудо"
+  },
+  {
+    "word": "worth",
+    "transcription": "[wɜːrθ]",
+    "translation": "стоящий, ценность"
+  },
+  {
+    "word": "achievement",
+    "transcription": "[əˈtʃiːvmənt]",
+    "translation": "достижение, успех"
+  },
+  {
+    "word": "adapt",
+    "transcription": "[əˈdæpt]",
+    "translation": "адаптироваться, приспосабливаться"
+  },
+  {
+    "word": "adequate",
+    "transcription": "[ˈædɪkwɪt]",
+    "translation": "достаточный, адекватный"
+  },
+  {
+    "word": "admire",
+    "transcription": "[ədˈmaɪər]",
+    "translation": "восхищаться, любоваться"
+  },
+  {
+    "word": "alert",
+    "transcription": "[əˈlɜːrt]",
+    "translation": "бдительный, предупреждать"
+  },
+  {
+    "word": "analyse",
+    "transcription": "[ˈænəlaɪz]",
+    "translation": "анализировать, исследовать"
+  },
+  {
+    "word": "apparent",
+    "transcription": "[əˈpærənt]",
+    "translation": "очевидный, кажущийся"
+  },
+  {
+    "word": "apply",
+    "transcription": "[əˈplaɪ]",
+    "translation": "применять, подавать заявку"
+  },
+  {
+    "word": "approach",
+    "transcription": "[əˈprəʊtʃ]",
+    "translation": "подход, подходить"
+  },
+  {
+    "word": "assess",
+    "transcription": "[əˈsɛs]",
+    "translation": "оценивать, устанавливать"
+  },
+  {
+    "word": "assign",
+    "transcription": "[əˈsaɪn]",
+    "translation": "назначать, поручать"
+  },
+  {
+    "word": "attempt",
+    "transcription": "[əˈtɛmpt]",
+    "translation": "попытка, пытаться"
+  },
+  {
+    "word": "aware",
+    "transcription": "[əˈwɛər]",
+    "translation": "осознающий, знающий"
+  },
+  {
+    "word": "basis",
+    "transcription": "[ˈbeɪsɪs]",
+    "translation": "основа, базис"
+  },
+  {
+    "word": "boundary",
+    "transcription": "[ˈbaʊndəri]",
+    "translation": "граница, предел"
+  },
+  {
+    "word": "brief",
+    "transcription": "[briːf]",
+    "translation": "краткий, инструктировать"
+  },
+  {
+    "word": "capable",
+    "transcription": "[ˈkeɪpəbəl]",
+    "translation": "способный, умелый"
+  },
+  {
+    "word": "capture",
+    "transcription": "[ˈkæptʃər]",
+    "translation": "захватывать, запечатлевать"
+  },
+  {
+    "word": "classify",
+    "transcription": "[ˈklæsɪfaɪ]",
+    "translation": "классифицировать, сортировать"
+  },
+  {
+    "word": "colleague",
+    "transcription": "[ˈkɒliːɡ]",
+    "translation": "коллега, сотрудник"
+  },
+  {
+    "word": "combine",
+    "transcription": "[kəmˈbaɪn]",
+    "translation": "объединять, сочетать"
+  },
+  {
+    "word": "comment",
+    "transcription": "[ˈkɒmɛnt]",
+    "translation": "комментарий, комментировать"
+  },
+  {
+    "word": "commit",
+    "transcription": "[kəˈmɪt]",
+    "translation": "совершать, посвящать себя"
+  },
+  {
+    "word": "complex",
+    "transcription": "[ˈkɒmplɛks]",
+    "translation": "сложный, комплекс"
+  },
+  {
+    "word": "concept",
+    "transcription": "[ˈkɒnsɛpt]",
+    "translation": "концепция, понятие"
+  },
+  {
+    "word": "concern",
+    "transcription": "[kənˈsɜːrn]",
+    "translation": "беспокойство, касаться"
+  },
+  {
+    "word": "conduct",
+    "transcription": "[ˈkɒndʌkt]",
+    "translation": "поведение, проводить"
+  },
+  {
+    "word": "consequence",
+    "transcription": "[ˈkɒnsɪkwəns]",
+    "translation": "последствие, результат"
+  },
+  {
+    "word": "context",
+    "transcription": "[ˈkɒntɛkst]",
+    "translation": "контекст, обстановка"
+  },
+  {
+    "word": "cope",
+    "transcription": "[kəʊp]",
+    "translation": "справляться, преодолевать"
+  },
+  {
+    "word": "correct",
+    "transcription": "[kəˈrɛkt]",
+    "translation": "правильный, исправлять"
+  },
+  {
+    "word": "create",
+    "transcription": "[kriˈeɪt]",
+    "translation": "создавать, творить"
+  },
+  {
+    "word": "critical",
+    "transcription": "[ˈkrɪtɪkəl]",
+    "translation": "критический, важный"
+  },
+  {
+    "word": "current",
+    "transcription": "[ˈkʌrənt]",
+    "translation": "текущий, нынешний"
+  },
+  {
+    "word": "deadline",
+    "transcription": "[ˈdɛdlaɪn]",
+    "translation": "крайний срок"
+  },
+  {
+    "word": "define",
+    "transcription": "[dɪˈfaɪn]",
+    "translation": "определять, давать определение"
+  },
+  {
+    "word": "demonstrate",
+    "transcription": "[ˈdɛmənstreɪt]",
+    "translation": "демонстрировать, показывать"
+  },
+  {
+    "word": "design",
+    "transcription": "[dɪˈzaɪn]",
+    "translation": "дизайн, разрабатывать"
+  },
+  {
+    "word": "detail",
+    "transcription": "[ˈdiːteɪl]",
+    "translation": "деталь, подробность"
+  },
+  {
+    "word": "determine",
+    "transcription": "[dɪˈtɜːrmɪn]",
+    "translation": "определять, устанавливать"
+  },
+  {
+    "word": "develop",
+    "transcription": "[dɪˈvɛləp]",
+    "translation": "развивать, разрабатывать"
+  },
+  {
+    "word": "digital",
+    "transcription": "[ˈdɪdʒɪtəl]",
+    "translation": "цифровой"
+  },
+  {
+    "word": "distribute",
+    "transcription": "[dɪˈstrɪbjuːt]",
+    "translation": "распределять, распространять"
+  },
+  {
+    "word": "diverse",
+    "transcription": "[daɪˈvɜːrs]",
+    "translation": "разнообразный, различный"
+  },
+  {
+    "word": "document",
+    "transcription": "[ˈdɒkjəmənt]",
+    "translation": "документ, документировать"
+  },
+  {
+    "word": "dominant",
+    "transcription": "[ˈdɒmɪnənt]",
+    "translation": "доминирующий, преобладающий"
+  },
+  {
+    "word": "dynamic",
+    "transcription": "[daɪˈnæmɪk]",
+    "translation": "динамичный, активный"
+  },
+  {
+    "word": "effective",
+    "transcription": "[ɪˈfɛktɪv]",
+    "translation": "эффективный, действенный"
+  },
+  {
+    "word": "eliminate",
+    "transcription": "[ɪˈlɪmɪneɪt]",
+    "translation": "устранять, исключать"
+  },
+  {
+    "word": "emphasize",
+    "transcription": "[ˈɛmfəsaɪz]",
+    "translation": "подчёркивать, делать акцент"
+  },
+  {
+    "word": "enable",
+    "transcription": "[ɪˈneɪbəl]",
+    "translation": "позволять, давать возможность"
+  },
+  {
+    "word": "engage",
+    "transcription": "[ɪnˈɡeɪdʒ]",
+    "translation": "вовлекать, заниматься"
+  },
+  {
+    "word": "enhance",
+    "transcription": "[ɪnˈhɑːns]",
+    "translation": "улучшать, усиливать"
+  },
+  {
+    "word": "ensure",
+    "transcription": "[ɪnˈʃʊər]",
+    "translation": "обеспечивать, гарантировать"
+  },
+  {
+    "word": "evaluate",
+    "transcription": "[ɪˈvæljueɪt]",
+    "translation": "оценивать, анализировать"
+  },
+  {
+    "word": "evidence",
+    "transcription": "[ˈɛvɪdəns]",
+    "translation": "доказательство, свидетельство"
+  },
+  {
+    "word": "expand",
+    "transcription": "[ɪkˈspænd]",
+    "translation": "расширять, увеличивать"
+  },
+  {
+    "word": "explicit",
+    "transcription": "[ɪkˈsplɪsɪt]",
+    "translation": "явный, чёткий"
+  },
+  {
+    "word": "factor",
+    "transcription": "[ˈfæktər]",
+    "translation": "фактор, обстоятельство"
+  },
+  {
+    "word": "feature",
+    "transcription": "[ˈfiːtʃər]",
+    "translation": "особенность, функция"
+  },
+  {
+    "word": "finance",
+    "transcription": "[ˈfaɪnæns]",
+    "translation": "финансы, финансировать"
+  },
+  {
+    "word": "formal",
+    "transcription": "[ˈfɔːrməl]",
+    "translation": "официальный, формальный"
+  },
+  {
+    "word": "format",
+    "transcription": "[ˈfɔːrmæt]",
+    "translation": "формат, форматировать"
+  },
+  {
+    "word": "function",
+    "transcription": "[ˈfʌŋkʃən]",
+    "translation": "функция, работать"
+  },
+  {
+    "word": "generate",
+    "transcription": "[ˈdʒɛnəreɪt]",
+    "translation": "генерировать, производить"
+  },
+  {
+    "word": "highlight",
+    "transcription": "[ˈhaɪlaɪt]",
+    "translation": "выделять, акцентировать"
+  },
+  {
+    "word": "impact",
+    "transcription": "[ˈɪmpækt]",
+    "translation": "воздействие, влиять"
+  },
+  {
+    "word": "implement",
+    "transcription": "[ˈɪmplɪmɛnt]",
+    "translation": "реализовывать, внедрять"
+  },
+  {
+    "word": "indicate",
+    "transcription": "[ˈɪndɪkeɪt]",
+    "translation": "указывать, свидетельствовать"
+  },
+  {
+    "word": "individual",
+    "transcription": "[ˌɪndɪˈvɪdʒuəl]",
+    "translation": "индивидуальный, человек"
+  },
+  {
+    "word": "initial",
+    "transcription": "[ɪˈnɪʃəl]",
+    "translation": "начальный, первоначальный"
+  },
+  {
+    "word": "initiative",
+    "transcription": "[ɪˈnɪʃətɪv]",
+    "translation": "инициатива, почин"
+  },
+  {
+    "word": "input",
+    "transcription": "[ˈɪnpʊt]",
+    "translation": "ввод, вклад"
+  },
+  {
+    "word": "insight",
+    "transcription": "[ˈɪnsaɪt]",
+    "translation": "понимание, проницательность"
+  },
+  {
+    "word": "integrate",
+    "transcription": "[ˈɪntɪɡreɪt]",
+    "translation": "интегрировать, объединять"
+  },
+  {
+    "word": "interpret",
+    "transcription": "[ɪnˈtɜːrprɪt]",
+    "translation": "интерпретировать, объяснять"
+  },
+  {
+    "word": "invest",
+    "transcription": "[ɪnˈvɛst]",
+    "translation": "инвестировать, вкладывать"
+  },
+  {
+    "word": "justify",
+    "transcription": "[ˈdʒʌstɪfaɪ]",
+    "translation": "обосновывать, оправдывать"
+  },
+  {
+    "word": "maintain",
+    "transcription": "[meɪnˈteɪn]",
+    "translation": "поддерживать, сохранять"
+  },
+  {
+    "word": "maximize",
+    "transcription": "[ˈmæksɪmaɪz]",
+    "translation": "максимизировать, увеличивать"
+  },
+  {
+    "word": "minimize",
+    "transcription": "[ˈmɪnɪmaɪz]",
+    "translation": "минимизировать, сокращать"
+  },
+  {
+    "word": "modify",
+    "transcription": "[ˈmɒdɪfaɪ]",
+    "translation": "изменять, модифицировать"
+  },
+  {
+    "word": "monitor",
+    "transcription": "[ˈmɒnɪtər]",
+    "translation": "контролировать, следить"
+  },
+  {
+    "word": "objective",
+    "transcription": "[əbˈdʒɛktɪv]",
+    "translation": "цель, объективный"
+  },
+  {
+    "word": "obtain",
+    "transcription": "[əbˈteɪn]",
+    "translation": "получать, приобретать"
+  },
+  {
+    "word": "outcome",
+    "transcription": "[ˈaʊtkʌm]",
+    "translation": "результат, исход"
+  },
+  {
+    "word": "output",
+    "transcription": "[ˈaʊtpʊt]",
+    "translation": "выход, результат"
+  },
+  {
+    "word": "overall",
+    "transcription": "[ˌəʊvərˈɔːl]",
+    "translation": "в целом, общий"
+  },
+  {
+    "word": "participate",
+    "transcription": "[pɑːˈtɪsɪpeɪt]",
+    "translation": "участвовать, принимать участие"
+  },
+  {
+    "word": "perceive",
+    "transcription": "[pəˈsiːv]",
+    "translation": "воспринимать, понимать"
+  },
+  {
+    "word": "phase",
+    "transcription": "[feɪz]",
+    "translation": "фаза, этап"
+  },
+  {
+    "word": "potential",
+    "transcription": "[pəˈtɛnʃəl]",
+    "translation": "потенциал, возможный"
+  },
+  {
+    "word": "priority",
+    "transcription": "[praɪˈɒrɪti]",
+    "translation": "приоритет, первоочередность"
+  },
+  {
+    "word": "process",
+    "transcription": "[ˈprəʊsɛs]",
+    "translation": "процесс, обрабатывать"
+  },
+  {
+    "word": "project",
+    "transcription": "[ˈprɒdʒɛkt]",
+    "translation": "проект, планировать"
+  },
+  {
+    "word": "propose",
+    "transcription": "[prəˈpəʊz]",
+    "translation": "предлагать, делать предложение"
+  },
+  {
+    "word": "range",
+    "transcription": "[reɪndʒ]",
+    "translation": "диапазон, ряд"
+  },
+  {
+    "word": "relevant",
+    "transcription": "[ˈrɛlɪvənt]",
+    "translation": "актуальный, относящийся к делу"
+  },
+  {
+    "word": "resolve",
+    "transcription": "[rɪˈzɒlv]",
+    "translation": "решать, разрешать"
+  },
+  {
+    "word": "resource",
+    "transcription": "[rɪˈsɔːrs]",
+    "translation": "ресурс, средство"
+  },
+  {
+    "word": "respond",
+    "transcription": "[rɪˈspɒnd]",
+    "translation": "отвечать, реагировать"
+  },
+  {
+    "word": "restore",
+    "transcription": "[rɪˈstɔːr]",
+    "translation": "восстанавливать, возвращать"
+  },
+  {
+    "word": "result",
+    "transcription": "[rɪˈzʌlt]",
+    "translation": "результат, следствие"
+  },
+  {
+    "word": "retain",
+    "transcription": "[rɪˈteɪn]",
+    "translation": "удерживать, сохранять"
+  },
+  {
+    "word": "review",
+    "transcription": "[rɪˈvjuː]",
+    "translation": "обзор, проверять"
+  },
+  {
+    "word": "revise",
+    "transcription": "[rɪˈvaɪz]",
+    "translation": "пересматривать, исправлять"
+  },
+  {
+    "word": "sector",
+    "transcription": "[ˈsɛktər]",
+    "translation": "сектор, область"
+  },
+  {
+    "word": "select",
+    "transcription": "[sɪˈlɛkt]",
+    "translation": "выбирать, отбирать"
+  },
+  {
+    "word": "sequence",
+    "transcription": "[ˈsiːkwəns]",
+    "translation": "последовательность, порядок"
+  },
+  {
+    "word": "simplify",
+    "transcription": "[ˈsɪmplɪfaɪ]",
+    "translation": "упрощать"
+  },
+  {
+    "word": "structure",
+    "transcription": "[ˈstrʌktʃər]",
+    "translation": "структура, строение"
+  },
+  {
+    "word": "submit",
+    "transcription": "[səbˈmɪt]",
+    "translation": "подавать, представлять"
+  },
+  {
+    "word": "summarize",
+    "transcription": "[ˈsʌməraɪz]",
+    "translation": "резюмировать, подводить итог"
+  },
+  {
+    "word": "sustainable",
+    "transcription": "[səˈsteɪnəbəl]",
+    "translation": "устойчивый, экологичный"
+  },
+  {
+    "word": "target",
+    "transcription": "[ˈtɑːrɡɪt]",
+    "translation": "цель, нацеливать"
+  },
+  {
+    "word": "technique",
+    "transcription": "[tɛkˈniːk]",
+    "translation": "техника, метод"
+  },
+  {
+    "word": "theory",
+    "transcription": "[ˈθɪəri]",
+    "translation": "теория"
+  },
+  {
+    "word": "transfer",
+    "transcription": "[trænsˈfɜːr]",
+    "translation": "передавать, переводить"
+  },
+  {
+    "word": "transform",
+    "transcription": "[trænsˈfɔːrm]",
+    "translation": "преобразовывать, трансформировать"
+  },
+  {
+    "word": "trend",
+    "transcription": "[trɛnd]",
+    "translation": "тенденция, тренд"
+  },
+  {
+    "word": "update",
+    "transcription": "[ʌpˈdeɪt]",
+    "translation": "обновлять, актуализировать"
+  },
+  {
+    "word": "utilize",
+    "transcription": "[ˈjuːtɪlaɪz]",
+    "translation": "использовать, применять"
+  },
+  {
+    "word": "validate",
+    "transcription": "[ˈvælɪdeɪt]",
+    "translation": "подтверждать, проверять"
+  },
+  {
+    "word": "version",
+    "transcription": "[ˈvɜːrʒən]",
+    "translation": "версия, вариант"
+  },
+  {
+    "word": "virtual",
+    "transcription": "[ˈvɜːrtʃuəl]",
+    "translation": "виртуальный"
+  },
+  {
+    "word": "visible",
+    "transcription": "[ˈvɪzɪbəl]",
+    "translation": "видимый, заметный"
+  },
+  {
+    "word": "accomplish",
+    "transcription": "[əˈkɒmplɪʃ]",
+    "translation": "выполнять, достигать"
+  },
+  {
+    "word": "accurate",
+    "transcription": "[ˈækjərɪt]",
+    "translation": "точный, верный"
+  },
+  {
+    "word": "acknowledge",
+    "transcription": "[əkˈnɒlɪdʒ]",
+    "translation": "признавать, подтверждать"
+  },
+  {
+    "word": "acquire",
+    "transcription": "[əˈkwaɪər]",
+    "translation": "приобретать, получать"
+  },
+  {
+    "word": "active",
+    "transcription": "[ˈæktɪv]",
+    "translation": "активный, деятельный"
+  },
+  {
+    "word": "actual",
+    "transcription": "[ˈæktʃuəl]",
+    "translation": "фактический, реальный"
+  },
+  {
+    "word": "alternative",
+    "transcription": "[ɔːlˈtɜːrnətɪv]",
+    "translation": "альтернативный, вариант"
+  },
+  {
+    "word": "analyze",
+    "transcription": "[ˈænəlaɪz]",
+    "translation": "анализировать"
+  },
+  {
+    "word": "annual",
+    "transcription": "[ˈænjuəl]",
+    "translation": "ежегодный, годовой"
+  },
+  {
+    "word": "anticipate",
+    "transcription": "[ænˈtɪsɪpeɪt]",
+    "translation": "предвидеть, ожидать"
+  },
+  {
+    "word": "appropriate",
+    "transcription": "[əˈprəʊpriɪt]",
+    "translation": "подходящий, уместный"
+  },
+  {
+    "word": "approval",
+    "transcription": "[əˈpruːvəl]",
+    "translation": "одобрение, согласие"
+  },
+  {
+    "word": "aspect",
+    "transcription": "[ˈæspɛkt]",
+    "translation": "аспект, сторона"
+  },
+  {
+    "word": "associate",
+    "transcription": "[əˈsəʊsieɪt]",
+    "translation": "ассоциировать, связывать"
+  },
+  {
+    "word": "assumption",
+    "transcription": "[əˈsʌmpʃən]",
+    "translation": "предположение, допущение"
+  },
+  {
+    "word": "authority",
+    "transcription": "[ɔːˈθɒrɪti]",
+    "translation": "авторитет, власть"
+  },
+  {
+    "word": "available",
+    "transcription": "[əˈveɪləbəl]",
+    "translation": "доступный, имеющийся"
+  },
+  {
+    "word": "bold",
+    "transcription": "[bəʊld]",
+    "translation": "смелый, решительный"
+  },
+  {
+    "word": "capable",
+    "transcription": "[ˈkeɪpəbəl]",
+    "translation": "способный"
+  },
+  {
+    "word": "category",
+    "transcription": "[ˈkætɪɡəri]",
+    "translation": "категория, класс"
+  },
+  {
+    "word": "clarify",
+    "transcription": "[ˈklærɪfaɪ]",
+    "translation": "прояснять, уточнять"
+  },
+  {
+    "word": "collaborate",
+    "transcription": "[kəˈlæbəreɪt]",
+    "translation": "сотрудничать, работать вместе"
+  },
+  {
+    "word": "commitment",
+    "transcription": "[kəˈmɪtmənt]",
+    "translation": "обязательство, преданность"
+  },
+  {
+    "word": "competence",
+    "transcription": "[ˈkɒmpɪtəns]",
+    "translation": "компетентность, способность"
+  },
+  {
+    "word": "comprehensive",
+    "transcription": "[ˌkɒmprɪˈhɛnsɪv]",
+    "translation": "всесторонний, полный"
+  },
+  {
+    "word": "consistent",
+    "transcription": "[kənˈsɪstənt]",
+    "translation": "последовательный, стабильный"
+  },
+  {
+    "word": "constructive",
+    "transcription": "[kənˈstrʌktɪv]",
+    "translation": "конструктивный, созидательный"
+  },
+  {
+    "word": "contrast",
+    "transcription": "[ˈkɒntrɑːst]",
+    "translation": "контраст, противопоставление"
+  },
+  {
+    "word": "cooperate",
+    "transcription": "[kəʊˈɒpəreɪt]",
+    "translation": "сотрудничать, кооперироваться"
+  },
+  {
+    "word": "coordinate",
+    "transcription": "[kəʊˈɔːrdɪneɪt]",
+    "translation": "координировать, согласовывать"
+  },
+  {
+    "word": "criticism",
+    "transcription": "[ˈkrɪtɪsɪzəm]",
+    "translation": "критика, замечание"
+  },
+  {
+    "word": "curriculum",
+    "transcription": "[kəˈrɪkjʊləm]",
+    "translation": "учебная программа"
+  },
+  {
+    "word": "deadline",
+    "transcription": "[ˈdɛdlaɪn]",
+    "translation": "дедлайн, крайний срок"
+  },
+  {
+    "word": "dedicated",
+    "transcription": "[ˈdɛdɪkeɪtɪd]",
+    "translation": "преданный, целеустремлённый"
+  },
+  {
+    "word": "defend",
+    "transcription": "[dɪˈfɛnd]",
+    "translation": "защищать"
+  },
+  {
+    "word": "deliberate",
+    "transcription": "[dɪˈlɪbərɪt]",
+    "translation": "намеренный, обдуманный"
+  },
+  {
+    "word": "deploy",
+    "transcription": "[dɪˈplɔɪ]",
+    "translation": "развёртывать, использовать"
+  },
+  {
+    "word": "derive",
+    "transcription": "[dɪˈraɪv]",
+    "translation": "получать, выводить"
+  },
+  {
+    "word": "distinguish",
+    "transcription": "[dɪˈstɪŋɡwɪʃ]",
+    "translation": "различать, выделять"
+  },
+  {
+    "word": "efficient",
+    "transcription": "[ɪˈfɪʃənt]",
+    "translation": "эффективный, экономичный"
+  },
+  {
+    "word": "elaborate",
+    "transcription": "[ɪˈlæbərɪt]",
+    "translation": "подробный, разрабатывать"
+  },
+  {
+    "word": "emerge",
+    "transcription": "[ɪˈmɜːrdʒ]",
+    "translation": "появляться, возникать"
+  },
+  {
+    "word": "emphasize",
+    "transcription": "[ˈɛmfəsaɪz]",
+    "translation": "подчёркивать"
+  },
+  {
+    "word": "encounter",
+    "transcription": "[ɪnˈkaʊntər]",
+    "translation": "встречать, столкнуться"
+  },
+  {
+    "word": "enforce",
+    "transcription": "[ɪnˈfɔːrs]",
+    "translation": "применять, обеспечивать соблюдение"
+  },
+  {
+    "word": "establish",
+    "transcription": "[ɪˈstæblɪʃ]",
+    "translation": "устанавливать, основывать"
+  },
+  {
+    "word": "evaluate",
+    "transcription": "[ɪˈvæljueɪt]",
+    "translation": "оценивать"
+  },
+  {
+    "word": "evolve",
+    "transcription": "[ɪˈvɒlv]",
+    "translation": "развиваться, эволюционировать"
+  },
+  {
+    "word": "exceed",
+    "transcription": "[ɪkˈsiːd]",
+    "translation": "превышать, превосходить"
+  },
+  {
+    "word": "execute",
+    "transcription": "[ˈɛksɪkjuːt]",
+    "translation": "выполнять, реализовывать"
+  },
+  {
+    "word": "exhibit",
+    "transcription": "[ɪɡˈzɪbɪt]",
+    "translation": "выставлять, демонстрировать"
+  },
+  {
+    "word": "explore",
+    "transcription": "[ɪkˈsplɔːr]",
+    "translation": "исследовать, изучать"
+  },
+  {
+    "word": "facilitate",
+    "transcription": "[fəˈsɪlɪteɪt]",
+    "translation": "облегчать, способствовать"
+  },
+  {
+    "word": "feedback",
+    "transcription": "[ˈfiːdbæk]",
+    "translation": "обратная связь, отклик"
+  },
+  {
+    "word": "flexible",
+    "transcription": "[ˈflɛksɪbəl]",
+    "translation": "гибкий"
+  },
+  {
+    "word": "framework",
+    "transcription": "[ˈfreɪmwɜːrk]",
+    "translation": "структура, рамки"
+  },
+  {
+    "word": "fundamental",
+    "transcription": "[ˌfʌndəˈmɛntəl]",
+    "translation": "фундаментальный"
+  },
+  {
+    "word": "global",
+    "transcription": "[ˈɡləʊbəl]",
+    "translation": "глобальный"
+  },
+  {
+    "word": "hypothesis",
+    "transcription": "[haɪˈpɒθɪsɪs]",
+    "translation": "гипотеза, предположение"
+  },
+  {
+    "word": "identify",
+    "transcription": "[aɪˈdɛntɪfaɪ]",
+    "translation": "определять, идентифицировать"
+  },
+  {
+    "word": "illustrate",
+    "transcription": "[ˈɪləstreɪt]",
+    "translation": "иллюстрировать, наглядно показывать"
+  },
+  {
+    "word": "implicit",
+    "transcription": "[ɪmˈplɪsɪt]",
+    "translation": "неявный, подразумеваемый"
+  },
+  {
+    "word": "impose",
+    "transcription": "[ɪmˈpəʊz]",
+    "translation": "навязывать, вводить"
+  },
+  {
+    "word": "incentive",
+    "transcription": "[ɪnˈsɛntɪv]",
+    "translation": "стимул, мотивация"
+  },
+  {
+    "word": "incorporate",
+    "transcription": "[ɪnˈkɔːrpəreɪt]",
+    "translation": "включать, объединять"
+  },
+  {
+    "word": "indicate",
+    "transcription": "[ˈɪndɪkeɪt]",
+    "translation": "указывать"
+  },
+  {
+    "word": "innovation",
+    "transcription": "[ˌɪnəˈveɪʃən]",
+    "translation": "инновация, нововведение"
+  },
+  {
+    "word": "interact",
+    "transcription": "[ˌɪntərˈækt]",
+    "translation": "взаимодействовать"
+  },
+  {
+    "word": "interface",
+    "transcription": "[ˈɪntəfeɪs]",
+    "translation": "интерфейс, взаимодействие"
+  },
+  {
+    "word": "justify",
+    "transcription": "[ˈdʒʌstɪfaɪ]",
+    "translation": "обосновывать"
+  },
+  {
+    "word": "label",
+    "transcription": "[ˈleɪbəl]",
+    "translation": "этикетка, маркировать"
+  },
+  {
+    "word": "language",
+    "transcription": "[ˈlæŋɡwɪdʒ]",
+    "translation": "язык"
+  },
+  {
+    "word": "leadership",
+    "transcription": "[ˈliːdəʃɪp]",
+    "translation": "лидерство, руководство"
+  },
+  {
+    "word": "lecture",
+    "transcription": "[ˈlɛktʃər]",
+    "translation": "лекция, читать лекцию"
+  },
+  {
+    "word": "legislation",
+    "transcription": "[ˌlɛdʒɪˈsleɪʃən]",
+    "translation": "законодательство, закон"
+  },
+  {
+    "word": "link",
+    "transcription": "[lɪŋk]",
+    "translation": "связь, ссылка, соединять"
+  },
+  {
+    "word": "logic",
+    "transcription": "[ˈlɒdʒɪk]",
+    "translation": "логика"
+  },
+  {
+    "word": "mechanism",
+    "transcription": "[ˈmɛkənɪzəm]",
+    "translation": "механизм"
+  },
+  {
+    "word": "medium",
+    "transcription": "[ˈmiːdiəm]",
+    "translation": "средний, средство"
+  },
+  {
+    "word": "memory",
+    "transcription": "[ˈmɛməri]",
+    "translation": "память, воспоминание"
+  },
+  {
+    "word": "mental",
+    "transcription": "[ˈmɛntəl]",
+    "translation": "умственный, психический"
+  },
+  {
+    "word": "minimal",
+    "transcription": "[ˈmɪnɪməl]",
+    "translation": "минимальный"
+  },
+  {
+    "word": "module",
+    "transcription": "[ˈmɒdjuːl]",
+    "translation": "модуль, блок"
+  },
+  {
+    "word": "network",
+    "transcription": "[ˈnɛtwɜːrk]",
+    "translation": "сеть, налаживать связи"
+  },
+  {
+    "word": "neutral",
+    "transcription": "[ˈnjuːtrəl]",
+    "translation": "нейтральный"
+  },
+  {
+    "word": "novel",
+    "transcription": "[ˈnɒvəl]",
+    "translation": "роман, новый оригинальный"
+  },
+  {
+    "word": "numerous",
+    "transcription": "[ˈnjuːmərəs]",
+    "translation": "многочисленный"
+  },
+  {
+    "word": "occur",
+    "transcription": "[əˈkɜːr]",
+    "translation": "происходить, случаться"
+  },
+  {
+    "word": "ongoing",
+    "transcription": "[ˈɒnɡəʊɪŋ]",
+    "translation": "текущий, продолжающийся"
+  },
+  {
+    "word": "optimal",
+    "transcription": "[ˈɒptɪməl]",
+    "translation": "оптимальный, наилучший"
+  },
+  {
+    "word": "option",
+    "transcription": "[ˈɒpʃən]",
+    "translation": "вариант, опция"
+  },
+  {
+    "word": "output",
+    "transcription": "[ˈaʊtpʊt]",
+    "translation": "результат, производительность"
+  },
+  {
+    "word": "passion",
+    "transcription": "[ˈpæʃən]",
+    "translation": "страсть, увлечение"
+  },
+  {
+    "word": "pattern",
+    "transcription": "[ˈpætərn]",
+    "translation": "шаблон, закономерность"
+  },
+  {
+    "word": "perspective",
+    "transcription": "[pəˈspɛktɪv]",
+    "translation": "перспектива, точка зрения"
+  },
+  {
+    "word": "phenomenon",
+    "transcription": "[fɪˈnɒmɪnən]",
+    "translation": "феномен, явление"
+  },
+  {
+    "word": "physical",
+    "transcription": "[ˈfɪzɪkəl]",
+    "translation": "физический, телесный"
+  },
+  {
+    "word": "precise",
+    "transcription": "[prɪˈsaɪs]",
+    "translation": "точный, чёткий"
+  },
+  {
+    "word": "principle",
+    "transcription": "[ˈprɪnsɪpəl]",
+    "translation": "принцип, основа"
+  },
+  {
+    "word": "professional",
+    "transcription": "[prəˈfɛʃənəl]",
+    "translation": "профессиональный"
+  },
+  {
+    "word": "profound",
+    "transcription": "[prəˈfaʊnd]",
+    "translation": "глубокий, значительный"
+  },
+  {
+    "word": "publish",
+    "transcription": "[ˈpʌblɪʃ]",
+    "translation": "публиковать, издавать"
+  },
+  {
+    "word": "pursue",
+    "transcription": "[pəˈsjuː]",
+    "translation": "преследовать, добиваться"
+  },
+  {
+    "word": "random",
+    "transcription": "[ˈrændəm]",
+    "translation": "случайный, произвольный"
+  },
+  {
+    "word": "rational",
+    "transcription": "[ˈræʃənəl]",
+    "translation": "рациональный, разумный"
+  },
+  {
+    "word": "realistic",
+    "transcription": "[ˌrɪəˈlɪstɪk]",
+    "translation": "реалистичный"
+  },
+  {
+    "word": "recovery",
+    "transcription": "[rɪˈkʌvəri]",
+    "translation": "восстановление, выздоровление"
+  },
+  {
+    "word": "refer",
+    "transcription": "[rɪˈfɜːr]",
+    "translation": "ссылаться, относить"
+  },
+  {
+    "word": "reinforce",
+    "transcription": "[ˌriːɪnˈfɔːrs]",
+    "translation": "усиливать, укреплять"
+  },
+  {
+    "word": "release",
+    "transcription": "[rɪˈliːs]",
+    "translation": "выпускать, освобождать"
+  },
+  {
+    "word": "remarkable",
+    "transcription": "[rɪˈmɑːrkəbəl]",
+    "translation": "замечательный, выдающийся"
+  },
+  {
+    "word": "replace",
+    "transcription": "[rɪˈpleɪs]",
+    "translation": "заменять, восстанавливать"
+  },
+  {
+    "word": "report",
+    "transcription": "[rɪˈpɔːrt]",
+    "translation": "отчёт, сообщать"
+  },
+  {
+    "word": "resistance",
+    "transcription": "[rɪˈzɪstəns]",
+    "translation": "сопротивление, стойкость"
+  },
+  {
+    "word": "responsibility",
+    "transcription": "[rɪˌspɒnsɪˈbɪlɪti]",
+    "translation": "ответственность"
+  },
+  {
+    "word": "restrict",
+    "transcription": "[rɪˈstrɪkt]",
+    "translation": "ограничивать"
+  },
+  {
+    "word": "scenario",
+    "transcription": "[sɪˈnɑːriəʊ]",
+    "translation": "сценарий, вариант развития"
+  },
+  {
+    "word": "scope",
+    "transcription": "[skəʊp]",
+    "translation": "охват, масштаб"
+  },
+  {
+    "word": "shift",
+    "transcription": "[ʃɪft]",
+    "translation": "сдвиг, смена, менять"
+  },
+  {
+    "word": "signal",
+    "transcription": "[ˈsɪɡnəl]",
+    "translation": "сигнал, указывать"
+  },
+  {
+    "word": "stable",
+    "transcription": "[ˈsteɪbəl]",
+    "translation": "стабильный, устойчивый"
+  },
+  {
+    "word": "standard",
+    "transcription": "[ˈstændərd]",
+    "translation": "стандарт, норма"
+  },
+  {
+    "word": "statement",
+    "transcription": "[ˈsteɪtmənt]",
+    "translation": "заявление, утверждение"
+  },
+  {
+    "word": "status",
+    "transcription": "[ˈsteɪtəs]",
+    "translation": "статус, положение"
+  },
+  {
+    "word": "strict",
+    "transcription": "[strɪkt]",
+    "translation": "строгий, точный"
+  },
+  {
+    "word": "sufficient",
+    "transcription": "[səˈfɪʃənt]",
+    "translation": "достаточный"
+  },
+  {
+    "word": "summarize",
+    "transcription": "[ˈsʌməraɪz]",
+    "translation": "резюмировать"
+  },
+  {
+    "word": "superior",
+    "transcription": "[suːˈpɪəriər]",
+    "translation": "превосходящий, вышестоящий"
+  },
+  {
+    "word": "supplement",
+    "transcription": "[ˈsʌplɪmənt]",
+    "translation": "дополнение, дополнять"
+  },
+  {
+    "word": "survey",
+    "transcription": "[ˈsɜːrveɪ]",
+    "translation": "опрос, исследование"
+  },
+  {
+    "word": "symbol",
+    "transcription": "[ˈsɪmbəl]",
+    "translation": "символ, знак"
+  },
+  {
+    "word": "systematic",
+    "transcription": "[ˌsɪstəˈmætɪk]",
+    "translation": "систематический"
+  },
+  {
+    "word": "terminal",
+    "transcription": "[ˈtɜːrmɪnəl]",
+    "translation": "терминал, конечный"
+  },
+  {
+    "word": "tolerance",
+    "transcription": "[ˈtɒlərəns]",
+    "translation": "терпимость, допуск"
+  },
+  {
+    "word": "transform",
+    "transcription": "[trænsˈfɔːrm]",
+    "translation": "преобразовывать"
+  },
+  {
+    "word": "transparent",
+    "transcription": "[trænsˈpærənt]",
+    "translation": "прозрачный, открытый"
+  },
+  {
+    "word": "trigger",
+    "transcription": "[ˈtrɪɡər]",
+    "translation": "запускать, триггер"
+  },
+  {
+    "word": "ultimate",
+    "transcription": "[ˈʌltɪmɪt]",
+    "translation": "конечный, окончательный"
+  },
+  {
+    "word": "uniform",
+    "transcription": "[ˈjuːnɪfɔːrm]",
+    "translation": "единообразный, форма"
+  },
+  {
+    "word": "universal",
+    "transcription": "[ˌjuːnɪˈvɜːrsəl]",
+    "translation": "универсальный, всеобщий"
+  },
+  {
+    "word": "valid",
+    "transcription": "[ˈvælɪd]",
+    "translation": "действительный, обоснованный"
+  },
+  {
+    "word": "variable",
+    "transcription": "[ˈvɛəriəbəl]",
+    "translation": "переменная, изменчивый"
+  },
+  {
+    "word": "verify",
+    "transcription": "[ˈvɛrɪfaɪ]",
+    "translation": "проверять, подтверждать"
+  },
+  {
+    "word": "vital",
+    "transcription": "[ˈvaɪtəl]",
+    "translation": "жизненно важный"
+  },
+  {
+    "word": "voluntary",
+    "transcription": "[ˈvɒləntəri]",
+    "translation": "добровольный"
+  },
+  {
+    "word": "widespread",
+    "transcription": "[ˈwaɪdsprɛd]",
+    "translation": "широко распространённый"
+  },
+  {
+    "word": "absorb",
+    "transcription": "[əbˈzɔːrb]",
+    "translation": "поглощать, усваивать"
+  },
+  {
+    "word": "abstract",
+    "transcription": "[ˈæbstrækt]",
+    "translation": "абстрактный, краткое изложение"
+  },
+  {
+    "word": "accelerate",
+    "transcription": "[əkˈsɛləreɪt]",
+    "translation": "ускорять, набирать скорость"
+  },
+  {
+    "word": "access",
+    "transcription": "[ˈæksɛs]",
+    "translation": "доступ, получать доступ"
+  },
+  {
+    "word": "accompany",
+    "transcription": "[əˈkʌmpəni]",
+    "translation": "сопровождать, аккомпанировать"
+  },
+  {
+    "word": "accumulate",
+    "transcription": "[əˈkjuːmjəleɪt]",
+    "translation": "накапливать, аккумулировать"
+  },
+  {
+    "word": "adhere",
+    "transcription": "[ədˈhɪər]",
+    "translation": "придерживаться, прилипать"
+  },
+  {
+    "word": "adjust",
+    "transcription": "[əˈdʒʌst]",
+    "translation": "регулировать, приспосабливаться"
+  },
+  {
+    "word": "administration",
+    "transcription": "[ədˌmɪnɪˈstreɪʃən]",
+    "translation": "администрация, управление"
+  },
+  {
+    "word": "advocate",
+    "transcription": "[ˈædvəkɪt]",
+    "translation": "защитник, отстаивать"
+  },
+  {
+    "word": "aggregate",
+    "transcription": "[ˈæɡrɪɡɪt]",
+    "translation": "совокупный, объединять"
+  },
+  {
+    "word": "allocate",
+    "transcription": "[ˈæləkeɪt]",
+    "translation": "распределять, выделять"
+  },
+  {
+    "word": "alter",
+    "transcription": "[ˈɔːltər]",
+    "translation": "изменять, переделывать"
+  },
+  {
+    "word": "ambiguous",
+    "transcription": "[æmˈbɪɡjuəs]",
+    "translation": "неоднозначный, двусмысленный"
+  },
+  {
+    "word": "amplify",
+    "transcription": "[ˈæmplɪfaɪ]",
+    "translation": "усиливать, расширять"
+  },
+  {
+    "word": "anticipate",
+    "transcription": "[ænˈtɪsɪpeɪt]",
+    "translation": "предвидеть"
+  },
+  {
+    "word": "arbitrary",
+    "transcription": "[ˈɑːrbɪtrəri]",
+    "translation": "произвольный, случайный"
+  },
+  {
+    "word": "articulate",
+    "transcription": "[ɑːˈtɪkjuleɪt]",
+    "translation": "чётко выражать, внятный"
+  },
+  {
+    "word": "attribute",
+    "transcription": "[ˈætrɪbjuːt]",
+    "translation": "атрибут, приписывать"
+  },
+  {
+    "word": "authentic",
+    "transcription": "[ɔːˈθɛntɪk]",
+    "translation": "подлинный, аутентичный"
+  },
+  {
+    "word": "benchmark",
+    "transcription": "[ˈbɛntʃmɑːrk]",
+    "translation": "эталон, ориентир"
+  },
+  {
+    "word": "bias",
+    "transcription": "[ˈbaɪəs]",
+    "translation": "предубеждение, склонность"
+  },
+  {
+    "word": "capacity",
+    "transcription": "[kəˈpæsɪti]",
+    "translation": "вместимость, способность"
+  },
+  {
+    "word": "comprehensive",
+    "transcription": "[ˌkɒmprɪˈhɛnsɪv]",
+    "translation": "всесторонний"
+  },
+  {
+    "word": "constraint",
+    "transcription": "[kənˈstreɪnt]",
+    "translation": "ограничение, принуждение"
+  },
+  {
+    "word": "controversial",
+    "transcription": "[ˌkɒntrəˈvɜːrʃəl]",
+    "translation": "спорный, противоречивый"
+  },
+  {
+    "word": "criteria",
+    "transcription": "[kraɪˈtɪəriə]",
+    "translation": "критерии, мерила"
+  },
+  {
+    "word": "dedicate",
+    "transcription": "[ˈdɛdɪkeɪt]",
+    "translation": "посвящать, отдавать"
+  },
+  {
+    "word": "deliberately",
+    "transcription": "[dɪˈlɪbərɪtli]",
+    "translation": "намеренно, обдуманно"
+  },
+  {
+    "word": "dimension",
+    "transcription": "[daɪˈmɛnʃən]",
+    "translation": "измерение, аспект"
+  },
+  {
+    "word": "discipline",
+    "transcription": "[ˈdɪsɪplɪn]",
+    "translation": "дисциплина, наказывать"
+  },
+  {
+    "word": "discourse",
+    "transcription": "[ˈdɪskɔːrs]",
+    "translation": "дискурс, рассуждение"
+  },
+  {
+    "word": "domain",
+    "transcription": "[dəˈmeɪn]",
+    "translation": "область, сфера"
+  },
+  {
+    "word": "emphasis",
+    "transcription": "[ˈɛmfəsɪs]",
+    "translation": "акцент, упор"
+  },
+  {
+    "word": "empirical",
+    "transcription": "[ɛmˈpɪrɪkəl]",
+    "translation": "эмпирический, опытный"
+  },
+  {
+    "word": "equivalent",
+    "transcription": "[ɪˈkwɪvələnt]",
+    "translation": "эквивалентный, равный"
+  },
+  {
+    "word": "ethical",
+    "transcription": "[ˈɛθɪkəl]",
+    "translation": "этический, моральный"
+  },
+  {
+    "word": "evident",
+    "transcription": "[ˈɛvɪdənt]",
+    "translation": "очевидный, явный"
+  },
+  {
+    "word": "exclusive",
+    "transcription": "[ɪkˈskluːsɪv]",
+    "translation": "исключительный, эксклюзивный"
+  },
+  {
+    "word": "extensive",
+    "transcription": "[ɪkˈstɛnsɪv]",
+    "translation": "обширный, подробный"
+  },
+  {
+    "word": "external",
+    "transcription": "[ɪkˈstɜːrnəl]",
+    "translation": "внешний, наружный"
+  },
+  {
+    "word": "extract",
+    "transcription": "[ˈɛkstrækt]",
+    "translation": "извлекать, выдержка"
+  },
+  {
+    "word": "facilitate",
+    "transcription": "[fəˈsɪlɪteɪt]",
+    "translation": "облегчать"
+  },
+  {
+    "word": "finite",
+    "transcription": "[ˈfaɪnaɪt]",
+    "translation": "конечный, ограниченный"
+  },
+  {
+    "word": "fluctuate",
+    "transcription": "[ˈflʌktʃueɪt]",
+    "translation": "колебаться, меняться"
+  },
+  {
+    "word": "formulate",
+    "transcription": "[ˈfɔːrmjuleɪt]",
+    "translation": "формулировать"
+  },
+  {
+    "word": "hierarchy",
+    "transcription": "[ˈhaɪərɑːrki]",
+    "translation": "иерархия"
+  },
+  {
+    "word": "identical",
+    "transcription": "[aɪˈdɛntɪkəl]",
+    "translation": "идентичный, одинаковый"
+  },
+  {
+    "word": "ideology",
+    "transcription": "[ˌaɪdɪˈɒlədʒi]",
+    "translation": "идеология"
+  },
+  {
+    "word": "implication",
+    "transcription": "[ˌɪmplɪˈkeɪʃən]",
+    "translation": "подразумевание, следствие"
+  },
+  {
+    "word": "increment",
+    "transcription": "[ˈɪŋkrɪmənt]",
+    "translation": "прирост, увеличение"
+  },
+  {
+    "word": "infrastructure",
+    "transcription": "[ˈɪnfrəstrʌktʃər]",
+    "translation": "инфраструктура"
+  },
+  {
+    "word": "inherent",
+    "transcription": "[ɪnˈhɪərənt]",
+    "translation": "присущий, неотъемлемый"
+  },
+  {
+    "word": "instance",
+    "transcription": "[ˈɪnstəns]",
+    "translation": "пример, случай"
+  },
+  {
+    "word": "integral",
+    "transcription": "[ˈɪntɪɡrəl]",
+    "translation": "неотъемлемый, интегральный"
+  },
+  {
+    "word": "interact",
+    "transcription": "[ˌɪntərˈækt]",
+    "translation": "взаимодействовать"
+  },
+  {
+    "word": "internal",
+    "transcription": "[ɪnˈtɜːrnəl]",
+    "translation": "внутренний"
+  },
+  {
+    "word": "interval",
+    "transcription": "[ˈɪntəvəl]",
+    "translation": "интервал, промежуток"
+  },
+  {
+    "word": "intuitive",
+    "transcription": "[ɪnˈtjuːɪtɪv]",
+    "translation": "интуитивный"
+  },
+  {
+    "word": "isolated",
+    "transcription": "[ˈaɪsəleɪtɪd]",
+    "translation": "изолированный, отдельный"
+  },
+  {
+    "word": "iteration",
+    "transcription": "[ˌɪtəˈreɪʃən]",
+    "translation": "итерация, повторение"
+  },
+  {
+    "word": "leverage",
+    "transcription": "[ˈliːvərɪdʒ]",
+    "translation": "использовать преимущество, рычаг"
+  },
+  {
+    "word": "linear",
+    "transcription": "[ˈlɪniər]",
+    "translation": "линейный, прямолинейный"
+  },
+  {
+    "word": "literally",
+    "transcription": "[ˈlɪtərəli]",
+    "translation": "буквально, дословно"
+  },
+  {
+    "word": "magnitude",
+    "transcription": "[ˈmæɡnɪtjuːd]",
+    "translation": "величина, масштаб"
+  },
+  {
+    "word": "manipulate",
+    "transcription": "[məˈnɪpjuleɪt]",
+    "translation": "манипулировать, управлять"
+  },
+  {
+    "word": "mature",
+    "transcription": "[məˈtʃʊər]",
+    "translation": "зрелый, развитый"
+  },
+  {
+    "word": "methodology",
+    "transcription": "[ˌmɛθəˈdɒlədʒi]",
+    "translation": "методология"
+  },
+  {
+    "word": "migration",
+    "transcription": "[maɪˈɡreɪʃən]",
+    "translation": "миграция, переселение"
+  },
+  {
+    "word": "navigate",
+    "transcription": "[ˈnævɪɡeɪt]",
+    "translation": "навигировать, ориентироваться"
+  },
+  {
+    "word": "negotiate",
+    "transcription": "[nɪˈɡəʊʃieɪt]",
+    "translation": "переговариваться, договариваться"
+  },
+  {
+    "word": "notion",
+    "transcription": "[ˈnəʊʃən]",
+    "translation": "понятие, идея"
+  },
+  {
+    "word": "objectively",
+    "transcription": "[əbˈdʒɛktɪvli]",
+    "translation": "объективно, беспристрастно"
+  },
+  {
+    "word": "obligation",
+    "transcription": "[ˌɒblɪˈɡeɪʃən]",
+    "translation": "обязательство, долг"
+  },
+  {
+    "word": "parameter",
+    "transcription": "[pəˈræmɪtər]",
+    "translation": "параметр, показатель"
+  },
+  {
+    "word": "paradigm",
+    "transcription": "[ˈpærədaɪm]",
+    "translation": "парадигма, образец"
+  },
+  {
+    "word": "parallel",
+    "transcription": "[ˈpærəlɛl]",
+    "translation": "параллельный, аналогичный"
+  },
+  {
+    "word": "peripheral",
+    "transcription": "[pəˈrɪfərəl]",
+    "translation": "периферийный, второстепенный"
+  },
+  {
+    "word": "persist",
+    "transcription": "[pəˈsɪst]",
+    "translation": "настаивать, продолжаться"
+  },
+  {
+    "word": "philosophy",
+    "transcription": "[fɪˈlɒsəfi]",
+    "translation": "философия"
+  },
+  {
+    "word": "preliminary",
+    "transcription": "[prɪˈlɪmɪnəri]",
+    "translation": "предварительный"
+  },
+  {
+    "word": "prerequisite",
+    "transcription": "[ˌpriːˈrɛkwɪzɪt]",
+    "translation": "предварительное условие"
+  },
+  {
+    "word": "primitive",
+    "transcription": "[ˈprɪmɪtɪv]",
+    "translation": "примитивный, первоначальный"
+  },
+  {
+    "word": "protocol",
+    "transcription": "[ˈprəʊtəkɒl]",
+    "translation": "протокол, правило"
+  },
+  {
+    "word": "quantify",
+    "transcription": "[ˈkwɒntɪfaɪ]",
+    "translation": "количественно определять"
+  },
+  {
+    "word": "query",
+    "transcription": "[ˈkwɪəri]",
+    "translation": "запрос, вопрос"
+  },
+  {
+    "word": "recursive",
+    "transcription": "[rɪˈkɜːrsɪv]",
+    "translation": "рекурсивный, повторяющийся"
+  },
+  {
+    "word": "redundant",
+    "transcription": "[rɪˈdʌndənt]",
+    "translation": "избыточный, лишний"
+  },
+  {
+    "word": "refine",
+    "transcription": "[rɪˈfaɪn]",
+    "translation": "совершенствовать, уточнять"
+  },
+  {
+    "word": "regulate",
+    "transcription": "[ˈrɛɡjuleɪt]",
+    "translation": "регулировать, контролировать"
+  },
+  {
+    "word": "reinforce",
+    "transcription": "[ˌriːɪnˈfɔːrs]",
+    "translation": "усиливать"
+  },
+  {
+    "word": "reliable",
+    "transcription": "[rɪˈlaɪəbəl]",
+    "translation": "надёжный"
+  },
+  {
+    "word": "replicate",
+    "transcription": "[ˈrɛplɪkeɪt]",
+    "translation": "воспроизводить, копировать"
+  },
+  {
+    "word": "robust",
+    "transcription": "[rəʊˈbʌst]",
+    "translation": "надёжный, крепкий"
+  },
+  {
+    "word": "scalable",
+    "transcription": "[ˈskeɪləbəl]",
+    "translation": "масштабируемый"
+  },
+  {
+    "word": "simulate",
+    "transcription": "[ˈsɪmjuleɪt]",
+    "translation": "симулировать, моделировать"
+  },
+  {
+    "word": "sophisticated",
+    "transcription": "[səˈfɪstɪkeɪtɪd]",
+    "translation": "сложный, изощрённый"
+  },
+  {
+    "word": "specification",
+    "transcription": "[ˌspɛsɪfɪˈkeɪʃən]",
+    "translation": "спецификация, требование"
+  },
+  {
+    "word": "static",
+    "transcription": "[ˈstætɪk]",
+    "translation": "статичный, неизменный"
+  },
+  {
+    "word": "subsequent",
+    "transcription": "[ˈsʌbsɪkwənt]",
+    "translation": "последующий, следующий"
+  },
+  {
+    "word": "subtle",
+    "transcription": "[ˈsʌtəl]",
+    "translation": "тонкий, едва уловимый"
+  },
+  {
+    "word": "synthesis",
+    "transcription": "[ˈsɪnθɪsɪs]",
+    "translation": "синтез, объединение"
+  },
+  {
+    "word": "threshold",
+    "transcription": "[ˈθrɛʃhəʊld]",
+    "translation": "порог, граница"
+  },
+  {
+    "word": "topology",
+    "transcription": "[təˈpɒlədʒi]",
+    "translation": "топология, структура"
+  },
+  {
+    "word": "trace",
+    "transcription": "[treɪs]",
+    "translation": "отслеживать, след"
+  },
+  {
+    "word": "transaction",
+    "transcription": "[trænsˈækʃən]",
+    "translation": "транзакция, сделка"
+  },
+  {
+    "word": "underlying",
+    "transcription": "[ˌʌndəˈlaɪɪŋ]",
+    "translation": "лежащий в основе, скрытый"
+  },
+  {
+    "word": "unify",
+    "transcription": "[ˈjuːnɪfaɪ]",
+    "translation": "объединять, унифицировать"
+  },
+  {
+    "word": "utilize",
+    "transcription": "[ˈjuːtɪlaɪz]",
+    "translation": "использовать"
+  },
+  {
+    "word": "variance",
+    "transcription": "[ˈvɛəriəns]",
+    "translation": "отклонение, дисперсия"
+  },
+  {
+    "word": "virtual",
+    "transcription": "[ˈvɜːrtʃuəl]",
+    "translation": "виртуальный"
+  },
+  {
+    "word": "yield",
+    "transcription": "[jiːld]",
+    "translation": "давать результат, уступать"
+  }
+]
