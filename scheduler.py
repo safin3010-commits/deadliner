@@ -1690,6 +1690,37 @@ async def _fetch_it_news() -> str:
     return ""
 
 
+async def check_lms_grades_and_notify(bot, chat_id: int):
+    """Каждый час — проверяем новые оценки в LMS."""
+    try:
+        from parsers.lms import fetch_lms_grades_changes
+        from bot.messages import format_lms_grade_notification
+        from storage import get_tasks, save_tasks
+
+        changes = await _retry(fetch_lms_grades_changes) or []
+
+        if changes:
+            for change in changes:
+                sent_key = change.get("_sent_key", "")
+                grade_key = f"lms_grade:{sent_key}"
+                if _is_notification_sent(grade_key):
+                    continue
+                text = format_lms_grade_notification(change)
+                sent_ok = await send_with_retry(bot, chat_id, _notify_header("🎓 Новая оценка — LMS") + text)
+                if sent_ok:
+                    _mark_notification_sent(grade_key)
+                    try:
+                        from parsers.lms import _load_lms_grades_sent, _save_lms_grades_sent
+                        _sent = _load_lms_grades_sent()
+                        _sent.add(sent_key)
+                        _save_lms_grades_sent(_sent)
+                    except Exception:
+                        pass
+
+    except Exception as e:
+        print(f"LMS grades notify error: {e}")
+
+
 async def check_vk_and_notify(bot, chat_id: int):
     """Каждые 15 минут — проверяем новые сообщения в беседе ВК за сегодня."""
     now = datetime.datetime.now(tz=UFA_TZ)
