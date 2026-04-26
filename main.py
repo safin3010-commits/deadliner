@@ -20,7 +20,7 @@ import os, sys
 import asyncio
 import logging
 from telegram.ext import Application
-from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID, MODEUS_USERNAME, LMS_USERNAME, NETOLOGY_EMAIL, YANDEX_MAIL, OPENROUTER_KEYS, GROQ_KEYS, VK_CHAT_URL, USER_NAME
+from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID, MODEUS_USERNAME, LMS_USERNAME, NETOLOGY_EMAIL, YANDEX_MAIL, GROQ_KEYS, VK_CHAT_URL, USER_NAME
 from bot.handlers import register_handlers
 from scheduler import setup_scheduler
 from storage import ensure_data_dir
@@ -55,8 +55,8 @@ async def check_setup(bot):
     if _is_setup_warned():
         return
     issues = []
-    if not OPENROUTER_KEYS and not GROQ_KEYS:
-        issues.append("⚠️ *AI* — не работает. Нужен ключ OpenRouter (openrouter.ai) или Groq (console.groq.com)")
+    if not GROQ_KEYS:
+        issues.append("⚠️ *AI* — не работает. Нужен ключ Groq (console.groq.com)")
     if not MODEUS_USERNAME:
         issues.append("⚠️ *Modeus* — нет расписания и оценок (нет MODEUS_USERNAME/PASSWORD)")
     if not LMS_USERNAME:

@@ -17,7 +17,7 @@ import urllib.parse
 
 
 
-from config import OPENROUTER_KEYS, YANDEX_TTS_KEY, TELEGRAM_TOKEN, MY_TELEGRAM_ID
+from config import GROQ_KEYS, YANDEX_TTS_KEY, TELEGRAM_TOKEN, MY_TELEGRAM_ID
 
 YANDEX_API_KEY = YANDEX_TTS_KEY
 YANDEX_VOICE = "ermil"
@@ -325,12 +325,12 @@ async def _ask_deepseek(text, system=None):
     global _key_index
     if system is None:
         system = SYSTEM_PROMPT
-    for attempt in range(len(OPENROUTER_KEYS)):
-        key = OPENROUTER_KEYS[_key_index % len(OPENROUTER_KEYS)]
+    for attempt in range(len(GROQ_KEYS)):
+        key = GROQ_KEYS[_key_index % len(GROQ_KEYS)]
         try:
             async with httpx.AsyncClient(timeout=20) as client:
                 resp = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
+                    "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                     json={
                         "model": "deepseek/deepseek-chat",
