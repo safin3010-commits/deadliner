@@ -1397,9 +1397,10 @@ async def send_midday_briefing(bot, chat_id: int):
             lines.append("📅 Пар сегодня нет 🎉")
             lines.append("")
 
-        # Ближайшая задача + мотивация от ИИ
+        # Ближайшая задача + мотивация от ИИ (только будущие, не просрочка)
         nearest = sorted(
-            [t for t in tasks if t.get("deadline")],
+            [t for t in tasks if t.get("deadline") and not t.get("done")
+             and datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ) >= now],
             key=lambda x: x["deadline"]
         )
         if nearest:
