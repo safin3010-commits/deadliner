@@ -2161,17 +2161,16 @@ async def send_afternoon_reminder(bot, chat_id: int):
 
         upcoming = [(d, t) for d, t in with_deadline if d >= 0]
         if upcoming:
-            msg += "\n\n📌 *Ближайшие задачи:*"
+            msg += "\n\n───────────────────\n📚 *БЛИЖАЙШИЕ ДЕДЛАЙНЫ*"
             for days, t in upcoming[:3]:
-                course = t.get("course_name", "")
                 title = t.get("title", "")
-                if days == 0:
-                    when = "сегодня"
-                elif days == 1:
-                    when = "завтра"
-                else:
-                    when = f"через {days} дн."
-                msg += f"\n• {course} — {title} _({when})_"
+                try:
+                    dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
+                    date_str = dt.strftime("%d.%m")
+                except Exception:
+                    date_str = ""
+                msg += f"\n{date_str}  {title}"
+            msg += "\n───────────────────"
 
         await send_with_retry(bot, chat_id, msg, parse_mode="Markdown")
         os.makedirs("data", exist_ok=True)
