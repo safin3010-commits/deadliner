@@ -29,3 +29,5 @@ start_jarvis.sh
 !data/english_rules.json
 !data/facts.json
 !data/quotes.json
+!data/english_words_backup.json
+!data/english_rules_backup.json
