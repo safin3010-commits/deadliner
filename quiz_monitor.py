@@ -8,7 +8,6 @@
 import asyncio
 import re
 import subprocess
-import httpx
 from config import MY_TELEGRAM_ID, TELEGRAM_TOKEN, VK_PROXY
 
 LMS_BASE_URL = "https://lms.utmn.ru"
@@ -30,22 +29,8 @@ def get_safari_url() -> str | None:
                 capture_output=True, text=True, timeout=3
             )
             url = result.stdout.strip()
-        elif sys.platform == "win32":
-            # Windows — через PowerShell
-            result = subprocess.run(
-                ["powershell", "-command",
-                 "(Get-Process chrome | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object -First 1).MainWindowTitle"],
-                capture_output=True, text=True, timeout=3
-            )
-            # На Windows получаем заголовок окна, не URL — используем pygetwindow как fallback
-            # Простейший вариант: читаем из буфера обмена если пользователь скопировал URL
-            url = ""
         else:
-            # Linux — через xdotool
-            result = subprocess.run(
-                ["xdotool", "getactivewindow", "getwindowname"],
-                capture_output=True, text=True, timeout=3
-            )
+            # Windows/Linux — автомониторинг недоступен
             url = ""
         return url if url and url.startswith("http") else None
     except Exception:
@@ -86,9 +71,10 @@ def _parse_questions(html: str) -> list[dict]:
         num_m = re.search(r'<span class="qno">(\d+)</span>', part)
         num = int(num_m.group(1)) if num_m else len(questions) + 1
 
-        qt = re.search(r'class="qtext"[^>]*>(.*?)</div>', part, re.DOTALL)
+        qt = re.search(r'class="qtext"[^>]*>(.*?)</div>\s*</div>', part, re.DOTALL)
         if not qt:
-            # Запасной — берём весь formulation блок
+            qt = re.search(r'class="qtext"[^>]*>(.*?)</div>', part, re.DOTALL)
+        if not qt:
             qt = re.search(r'class="formulation[^"]*"[^>]*>(.*?)<div class="answer"', part, re.DOTALL)
         if not qt:
             continue
@@ -114,12 +100,16 @@ def _parse_questions(html: str) -> list[dict]:
 
 async def send_tg(text: str):
     try:
-        async with httpx.AsyncClient(timeout=10) as c:
-            await c.post(
+        import requests as _req
+        def _send():
+            return _req.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                json={"chat_id": MY_TELEGRAM_ID, "text": text, "parse_mode": "Markdown"}
+                json={"chat_id": MY_TELEGRAM_ID, "text": text},
+                timeout=10
             )
+        await asyncio.to_thread(_send)
     except Exception as e:
+        import traceback; traceback.print_exc()
         print(f"TG error: {e}")
 
 
@@ -127,15 +117,22 @@ async def fetch_page_with_safari_cookies(url: str) -> str | None:
     """Загружаем страницу используя cookies из Safari — та же сессия."""
     cookies = get_safari_cookies()
     if not cookies:
-        print("⚠️ Не удалось получить cookies из Safari")
+        print("⚠️ Не удалось получить cookies из Chrome")
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=HEADERS, cookies=cookies, **({"proxy": PROXY} if PROXY else {})) as client:
-            r = await client.get(url)
-            if "login" in str(r.url).lower():
-                return None
-            return r.text
+        import requests as _requests
+        def _do_get():
+            s = _requests.Session()
+            s.headers.update(HEADERS)
+            s.cookies.update(cookies)
+            if PROXY:
+                s.proxies = {"https": PROXY, "http": PROXY}
+            return s.get(url, timeout=20)
+        r = await asyncio.to_thread(_do_get)
+        if "login" in str(r.url).lower():
+            return None
+        return r.text
     except Exception as e:
         print(f"Fetch error: {e}")
         return None
@@ -144,8 +141,14 @@ async def fetch_page_with_safari_cookies(url: str) -> str | None:
 async def fetch_next_page(attempt_id: str, cmid: str, from_page: int, sesskey: str, slots: str, cookies: dict) -> str | None:
     """POST на processattempt с cookies Safari."""
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=HEADERS, cookies=cookies, **({"proxy": PROXY} if PROXY else {})) as client:
-            r = await client.post(
+        import requests as _requests
+        def _do_post():
+            s = _requests.Session()
+            s.headers.update(HEADERS)
+            s.cookies.update(cookies)
+            if PROXY:
+                s.proxies = {"https": PROXY, "http": PROXY}
+            return s.post(
                 f"{LMS_BASE_URL}/mod/quiz/processattempt.php?cmid={cmid}",
                 data={
                     "attempt": attempt_id,
@@ -159,11 +162,13 @@ async def fetch_next_page(attempt_id: str, cmid: str, from_page: int, sesskey: s
                 },
                 headers={**HEADERS,
                          "Content-Type": "application/x-www-form-urlencoded",
-                         "Referer": f"{LMS_BASE_URL}/mod/quiz/attempt.php?attempt={attempt_id}&cmid={cmid}&page={from_page}"}
+                         "Referer": f"{LMS_BASE_URL}/mod/quiz/attempt.php?attempt={attempt_id}&cmid={cmid}&page={from_page}"},
+                timeout=20
             )
-            if "login" in str(r.url).lower():
-                return None
-            return r.text
+        r = await asyncio.to_thread(_do_post)
+        if "login" in str(r.url).lower():
+            return None
+        return r.text
     except Exception as e:
         print(f"POST error: {e}")
         return None
@@ -181,18 +186,44 @@ async def process_quiz(url: str):
     _sent_attempts.add(attempt_id)
     print(f"📝 Тест attempt={attempt_id}, cmid={cmid}")
 
-    # Берём cookies прямо из Safari — та же авторизованная сессия
+    # Берём cookies прямо из Chrome — та же авторизованная сессия
     cookies = get_safari_cookies()
     if not cookies:
-        await send_tg("❌ Не удалось получить сессию из Safari. Убедись что Safari открыт и ты залогинен в LMS.")
+        await send_tg("❌ Не удалось получить сессию из Chrome. Убедись что Chrome открыт и ты залогинен в LMS.")
         return
 
+    import requests as _requests
+    _session = _requests.Session()
+    _session.max_redirects = 100
+    _session.headers.update(HEADERS)
+    _session.cookies.update(cookies)
+    if PROXY:
+        _session.proxies = {"https": PROXY, "http": PROXY}
+
+    def _get_page(url):
+        fresh = get_safari_cookies()
+        if fresh:
+            _session.cookies.update(fresh)
+        return _session.get(url, timeout=20)
+
+    def _post_page(cmid, data, referer):
+        return _session.post(
+            f"{LMS_BASE_URL}/mod/quiz/processattempt.php?cmid={cmid}",
+            data=data,
+            headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded", "Referer": referer},
+            timeout=20
+        )
+
     # Загружаем страницу 0
-    html = await fetch_page_with_safari_cookies(
-        f"{LMS_BASE_URL}/mod/quiz/attempt.php?attempt={attempt_id}&cmid={cmid}&page=0"
-    )
+    def _fetch0():
+        r = _get_page(f"{LMS_BASE_URL}/mod/quiz/attempt.php?attempt={attempt_id}&cmid={cmid}&page=0")
+        if "login" in str(r.url).lower():
+            return None
+        return r.text
+
+    html = await asyncio.to_thread(_fetch0)
     if not html:
-        await send_tg("❌ Не удалось загрузить тест. Возможно сессия истекла — обнови страницу в Safari.")
+        await send_tg("❌ Не удалось загрузить тест. Возможно сессия истекла — обнови страницу в Chrome.")
         _sent_attempts.discard(attempt_id)
         return
 
@@ -209,22 +240,19 @@ async def process_quiz(url: str):
     await send_tg(f"📝 *{quiz_title}*\n📊 Всего вопросов: ~{total_pages}\n⏳ Парсю...")
 
     all_questions = []
-    current_html = html
 
     for page_num in range(total_pages):
-        if page_num > 0:
-            sesskey_m = re.search(r'name="sesskey"\s+value="([^"]+)"', current_html)
-            slots_m = re.search(r'name="slots"\s+value="([^"]*)"', current_html)
-            sesskey = sesskey_m.group(1) if sesskey_m else ""
-            slots = slots_m.group(1) if slots_m else ""
+        def _fetch_page(pn=page_num):
+            r = _get_page(f"{LMS_BASE_URL}/mod/quiz/attempt.php?attempt={attempt_id}&cmid={cmid}&page={pn}")
+            if "login" in str(r.url).lower():
+                return None
+            return r.text
+        page_html = await asyncio.to_thread(_fetch_page)
+        if not page_html:
+            print(f"⚠️ Страница {page_num+1} не загрузилась")
+            continue
 
-            current_html = await fetch_next_page(attempt_id, cmid, page_num - 1, sesskey, slots, cookies)
-            if not current_html:
-                print(f"⚠️ Страница {page_num+1} не загрузилась")
-                break
-            await asyncio.sleep(0.5)
-
-        questions = _parse_questions(current_html)
+        questions = _parse_questions(page_html)
         all_questions.extend(questions)
         print(f"  Страница {page_num+1}: {len(questions)} вопросов")
 
@@ -233,22 +261,29 @@ async def process_quiz(url: str):
         return
 
     for q in all_questions:
-        lines = [f"❓ *Вопрос {q['num']}*\n\n{q['text']}"]
+        lines = [f"❓ Вопрос {q['num']}\n\n{q['text']}"]
         if q["answers"]:
-            lines.append("\n*Варианты:*")
+            lines.append("\nВарианты:")
             for ans in q["answers"]:
                 lines.append(f"  {ans}")
-        await send_tg("\n".join(lines))
-        await asyncio.sleep(0.3)
+        msg = "\n".join(lines)
+        print(f"Отправляю вопрос {q['num']}, длина {len(msg)}")
+        await send_tg(msg)
+        print(f"Отправлен вопрос {q['num']}")
 
-    await send_tg(f"✅ *Готово!* Все {len(all_questions)} вопросов отправлены")
+
+    await send_tg(f"✅ Готово! Все {len(all_questions)} вопросов отправлены")
     print(f"✅ Готово — {len(all_questions)} вопросов")
 
 
 async def monitor():
-    print("🔍 Мониторинг Safari запущен")
-    print("   Открывай тесты в Safari — вопросы придут в Telegram")
+    import sys as _sys
+    print("🔍 Мониторинг Chrome запущен")
+    print("   Открывай тесты в Chrome — вопросы придут в Telegram")
     print("   Ctrl+C для остановки\n")
+    if _sys.platform != "darwin":
+        await send_tg("ℹ️ На Windows/Linux автомониторинг недоступен.\nПередай URL теста: /quiz https://lms.utmn.ru/mod/quiz/attempt.php?attempt=...")
+        return
 
     # Сообщение отправляется из handlers.py
 
@@ -272,4 +307,5 @@ async def monitor():
             pass
 
 
-asyncio.run(monitor())
+if __name__ == "__main__":
+    asyncio.run(monitor())
