@@ -381,10 +381,10 @@ async def sync_all_tasks(bot=None, chat_id=None):
         existing_tasks = get_tasks()
         existing_ids = {t.get("id") for t in existing_tasks}
 
-        import os as _os
+        import os as _os3
         notified_file = "data/notified_tasks.json"
         try:
-            notified = json.load(open(notified_file)) if _os.path.exists(notified_file) else []
+            notified = json.load(open(notified_file)) if _os3.path.exists(notified_file) else []
         except Exception:
             notified = []
         notified_changed = False
@@ -1860,6 +1860,32 @@ def _mark_midday_sent():
     os.makedirs("data", exist_ok=True)
     with open(state_file, "w") as f:
         json.dump({"remaining": remaining}, f)
+    return all_quotes[idx]
+
+
+def _get_quote() -> str:
+    """Берём случайную цитату из файла, каждая появляется раз за полный цикл."""
+    import json as _json2, os as _os2, random as _random2
+    quotes_file = "data/quotes.json"
+    state_file = "data/quotes_state.json"
+    try:
+        with open(quotes_file, encoding="utf-8") as f:
+            all_quotes = _json2.load(f)
+    except Exception:
+        return "Успех — это сумма небольших усилий, повторяемых день за днём."
+    try:
+        with open(state_file) as f:
+            state = _json2.load(f)
+    except Exception:
+        state = {"remaining": []}
+    remaining = state.get("remaining", [])
+    if not remaining:
+        remaining = list(range(len(all_quotes)))
+        _random2.shuffle(remaining)
+    idx = remaining.pop(0)
+    _os2.makedirs("data", exist_ok=True)
+    with open(state_file, "w") as f:
+        _json2.dump({"remaining": remaining}, f)
     return all_quotes[idx]
 
 
