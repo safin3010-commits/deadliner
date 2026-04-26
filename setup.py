@@ -263,7 +263,6 @@ def main():
     print("  Groq (console.groq.com) — llama-3.3-70b, бесплатно")
     print("  Регистрация: https://console.groq.com")
     groq_key = ask("Ключ Groq", required=False)
-    openrouter = ""
     print()
 
     # ── Учёба ──
@@ -342,6 +341,7 @@ def main():
     vk_proxy = ""
     chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     if vk_chat_url:
+        pass
     print()
 
     # ── Пишем .env ──
