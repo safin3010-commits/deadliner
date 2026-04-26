@@ -17,15 +17,15 @@ echo "Старые процессы убиты"
 # Убиваем все оставшиеся экземпляры на всякий случай
 pkill -f "main\.py" 2>/dev/null; sleep 1
 
-# Не давать маку спать
-if command -v caffeinate &> /dev/null; then
-  caffeinate -i &
-  echo "Caffeinate запущен"
-fi
-
 # Запускаем
 venv/bin/python3 main.py >> bot.log 2>&1 &
 PID=$!
+
+# Не давать маку спать — привязываем к PID бота
+if command -v caffeinate &> /dev/null; then
+  caffeinate -s -w $PID &
+  echo "Caffeinate запущен"
+fi
 sleep 3
 
 if kill -0 $PID 2>/dev/null; then
