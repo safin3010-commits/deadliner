@@ -443,8 +443,12 @@ async def sync_all_tasks(bot=None, chat_id=None):
                         print(f"sync_all_tasks: не удалось отправить уведомление: {ex}")
 
         if notified_changed:
-            with open(notified_file, "w") as _f:
-                json.dump(notified[-500:], _f, ensure_ascii=False)
+            try:
+                with open(notified_file, "w") as _f:
+                    json.dump(notified[-500:], _f, ensure_ascii=False)
+                print(f"sync_all_tasks: сохранено {len(notified)} уведомлённых задач")
+            except Exception as e:
+                print(f"sync_all_tasks: ошибка сохранения notified: {e}")
 
         if updated:
             print(f"Scheduler: обновлено дедлайнов: {updated}")
@@ -630,11 +634,11 @@ async def check_mail_and_notify(bot, chat_id: int):
                 )
             except Exception:
                 pass
-            # Помечаем сразу — чтобы не дублировать даже в тихие часы
-            add_seen_message(email_data["id"])
             text = new_email_message(email_data)
             keyboard = task_from_message_keyboard(email_data["id"])
-            await send_with_retry(bot, chat_id, text, parse_mode="HTML", reply_markup=keyboard)
+            sent = await send_with_retry(bot, chat_id, text, parse_mode="HTML", reply_markup=keyboard)
+            if sent:
+                add_seen_message(email_data["id"])
 
     except Exception as e:
         print(f"Scheduler mail check error: {e}")
@@ -655,11 +659,11 @@ async def check_messenger_and_notify(bot, chat_id: int):
                 )
             except Exception:
                 pass
-            # Помечаем сразу — чтобы не дублировать даже в тихие часы
-            add_seen_message(msg["id"])
             text = new_messenger_message(msg)
             keyboard = task_from_message_keyboard(msg["id"])
-            await send_with_retry(bot, chat_id, text, parse_mode="HTML", reply_markup=keyboard)
+            sent = await send_with_retry(bot, chat_id, text, parse_mode="HTML", reply_markup=keyboard)
+            if sent:
+                add_seen_message(msg["id"])
 
     except Exception as e:
         print(f"Scheduler messenger check error: {e}")
