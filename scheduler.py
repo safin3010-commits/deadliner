@@ -6,6 +6,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import UFA_TZ, PARSE_HOURS, USER_NAME, WEATHER_LAT, WEATHER_LON
 from storage import get_pending_tasks, get_tasks, save_tasks
 
+MONTHS_RU = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
+DAYS_RU = ["понедельник","вторник","среда","четверг","пятница","суббота","воскресенье"]
+
+
 PENDING_NOTIFICATIONS_FILE = "data/pending_notifications.json"
 JARVIS_QUEUE_FILE = "data/jarvis_queue.json"
 
@@ -477,140 +481,6 @@ async def _get_study_analysis_short() -> str:
 
 # ─── Дневной брифинг 14:00 ───────────────────────────────────────────
 
-async def send_midday_reminder(bot, chat_id: int):
-    """14:00 — одно сообщение: оставшиеся пары + срочные дедлайны."""
-    try:
-        print("Scheduler: дневное напоминание...")
-        await sync_all_tasks()
-
-        schedule = await _retry(_fetch_schedule_fresh_or_cache) or []
-        tasks = get_pending_tasks()
-        now = datetime.datetime.now(tz=UFA_TZ)
-
-        lines = ["🌞 *Дневная сводка*\n"]
-
-        # Только будущие пары
-        future_lessons = []
-        if schedule:
-            from bot.messages import _expand_and_sort, _lesson_emoji, _s
-            for lesson in _expand_and_sort(schedule):
-                try:
-                    start_dt = datetime.datetime.fromisoformat(lesson["start"])
-                    if start_dt.tzinfo is None:
-                        start_dt = start_dt.replace(tzinfo=UFA_TZ)
-                    if start_dt > now:
-                        future_lessons.append(lesson)
-                except Exception:
-                    continue
-
-        if future_lessons:
-            lines.append("📅 *Оставшиеся пары:*")
-            from bot.messages import _expand_and_sort, _lesson_emoji, _s
-            for lesson in future_lessons:
-                emoji = _lesson_emoji(lesson)
-                name = _s(lesson.get("course_name")) or _s(lesson.get("name"))
-                start = _s(lesson.get("start_time"))
-                lines.append(f"  {emoji} {start} — {name}")
-            lines.append("")
-        else:
-            lines.append("📅 Пар больше нет\n")
-
-        # Срочные задачи ≤3 дней
-        urgent = []
-        for t in tasks:
-            if not t.get("deadline"):
-                continue
-            try:
-                dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
-                days = (dt - now).days
-                if days <= 3:
-                    urgent.append((days, t))
-            except Exception:
-                continue
-        urgent.sort(key=lambda x: x[0])
-
-        if urgent:
-            lines.append("⚠️ *Срочные задачи:*")
-            for days, t in urgent[:5]:
-                from bot.messages import _short_course, _deadline_emoji, _format_date
-                emoji = _deadline_emoji(t.get("deadline"))
-                course = _short_course(t.get("course_name", ""))
-                title = t.get("title", "")
-                date = _format_date(t.get("deadline"))
-                lines.append(f"  {emoji} *{course}* — {title} _{date}_")
-        else:
-            lines.append("✅ Срочных задач нет")
-
-        await send_with_retry(bot, chat_id, "\n".join(lines))
-
-    except Exception as e:
-        print(f"Scheduler midday reminder error: {e}")
-
-
-# ─── Вечерний брифинг 21:00 ──────────────────────────────────────────
-
-async def send_evening_reminder(bot, chat_id: int):
-    """21:00 — одно сообщение: анализ дня + что завтра."""
-    try:
-        print("Scheduler: вечернее напоминание...")
-        await sync_all_tasks()
-
-        tasks = get_tasks()
-        tasks_pending = [t for t in tasks if not t.get("done")]
-        tasks_done = [t for t in tasks if t.get("done")]
-        now = datetime.datetime.now(tz=UFA_TZ)
-
-        # Завтрашние дедлайны
-        tomorrow = (now + datetime.timedelta(days=1)).date()
-        tomorrow_tasks = []
-        for t in tasks_pending:
-            try:
-                d = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ).date()
-                if d == tomorrow:
-                    tomorrow_tasks.append(t)
-            except Exception:
-                continue
-
-        lines = ["🌙 *Итог дня*\n"]
-        lines.append(f"✅ Выполнено всего: *{len(tasks_done)}*")
-        lines.append(f"📋 Осталось: *{len(tasks_pending)}*")
-
-        if tomorrow_tasks:
-            lines.append("\n⚠️ *Завтра дедлайн:*")
-            for t in tomorrow_tasks:
-                from bot.messages import _short_course
-                course = _short_course(t.get("course_name", ""))
-                lines.append(f"  🔴 {course} — {t['title']}")
-
-        # Groq анализ + завтра
-        try:
-            from grok import ask_grok
-            schedule_tomorrow = await _fetch_tomorrow_schedule()
-            sched_str = ""
-            if schedule_tomorrow:
-                from bot.messages import _s, _lesson_emoji
-                pairs = [f"{_s(l.get('start_time'))} {_s(l.get('course_name'))}" for l in schedule_tomorrow[:3]]
-                sched_str = f"Завтра пары: {', '.join(pairs)}. "
-
-            urgent_str = ""
-            if tomorrow_tasks:
-                urgent_str = f"Завтра дедлайн: {', '.join(t['title'][:20] for t in tomorrow_tasks[:3])}. "
-
-            prompt = (
-                f"Осталось задач: {len(tasks_pending)}. "
-                f"{sched_str}{urgent_str}"
-                f"Напиши 2 предложения: мотивирующий итог дня и что важно сделать завтра. Без выдуманных фактов."
-            )
-            grok_text = await ask_grok(prompt)
-            if grok_text:
-                lines.append(f"\n🤖 {grok_text}")
-        except Exception as e:
-            print(f"Groq evening error: {e}")
-
-        await send_with_retry(bot, chat_id, "\n".join(lines))
-
-    except Exception as e:
-        print(f"Scheduler evening reminder error: {e}")
 
 
 async def _fetch_tomorrow_schedule() -> list:
@@ -1167,19 +1037,6 @@ async def send_weekly_report(bot, chat_id: int):
 
 # ─── Главные задачи планировщика ─────────────────────────────────────
 
-async def sync_at_9(bot, chat_id: int):
-    await send_morning_briefing(bot, chat_id)
-    await check_deadline_reminders(bot, chat_id)
-
-
-async def sync_at_14(bot, chat_id: int):
-    await send_midday_reminder(bot, chat_id)
-    await check_deadline_reminders(bot, chat_id)
-
-
-async def sync_at_21(bot, chat_id: int):
-    await send_evening_reminder(bot, chat_id)
-
 
 # ─── Настройка планировщика ───────────────────────────────────────────
 
@@ -1188,89 +1045,83 @@ async def sync_at_21(bot, chat_id: int):
 
 
 async def _fetch_weather() -> str:
-    """Погода в Чесноковке — сейчас / днём / вечером через OpenWeatherMap."""
+    """Погода через Open-Meteo (без ключа)."""
     try:
         import httpx
         lat, lon = WEATHER_LAT, WEATHER_LON
-        from config import OPENWEATHER_KEY
-        api_key = OPENWEATHER_KEY
-
-        async with httpx.AsyncClient(timeout=10) as client:
-            r_cur = await client.get(
-                "https://api.openweathermap.org/data/2.5/weather",
-                params={"lat": lat, "lon": lon, "appid": api_key, "units": "metric", "lang": "ru"}
-            )
-            cur = r_cur.json()
-            r_fc = await client.get(
-                "https://api.openweathermap.org/data/2.5/forecast",
-                params={"lat": lat, "lon": lon, "appid": api_key, "units": "metric", "lang": "ru", "cnt": 16}
-            )
-            fc = r_fc.json()
-
-        def _icon(desc):
-            d = desc.lower()
-            if "ясно" in d: return "☀️"
-            elif "малооблачно" in d: return "⛅"
-            elif "облачно" in d or "пасмурно" in d: return "☁️"
-            elif "гроза" in d: return "⛈️"
-            elif "дождь" in d or "ливень" in d or "морось" in d: return "🌧️"
-            elif "снег" in d or "метель" in d: return "❄️"
-            elif "туман" in d: return "🌫️"
+        WMO = {
+            0:"ясно",1:"почти ясно",2:"переменная облачность",3:"пасмурно",
+            45:"туман",48:"туман с инеем",51:"лёгкая морось",53:"морось",55:"сильная морось",
+            61:"лёгкий дождь",63:"дождь",65:"сильный дождь",
+            71:"лёгкий снег",73:"снег",75:"сильный снег",77:"снежная крупа",
+            80:"ливень",81:"ливни",82:"сильный ливень",
+            85:"снегопад",86:"сильный снегопад",
+            95:"гроза",96:"гроза с градом",99:"гроза с сильным градом",
+        }
+        def _icon(code):
+            if code == 0: return "☀️"
+            elif code in (1,2): return "⛅"
+            elif code == 3: return "☁️"
+            elif code in (45,48): return "🌫️"
+            elif code in (51,53,55,61,63,65,80,81,82): return "🌧️"
+            elif code in (71,73,75,77,85,86): return "❄️"
+            elif code in (95,96,99): return "⛈️"
             else: return "🌤️"
 
-        def _precip(item):
-            rain = item.get("rain", {}).get("3h", 0)
-            snow = item.get("snow", {}).get("3h", 0)
-            if rain > 0: return f" 🌧️{rain:.1f}мм"
-            if snow > 0: return f" ❄️{snow:.1f}мм"
-            return ""
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": lat, "longitude": lon,
+                    "current": "temperature_2m,weathercode,windspeed_10m,precipitation",
+                    "hourly": "temperature_2m,weathercode,windspeed_10m",
+                    "forecast_days": 1,
+                    "timezone": "auto",
+                }
+            )
+            d = r.json()
 
-        now_temp = round(cur["main"]["temp"])
-        now_feels = round(cur["main"]["feels_like"])
-        now_desc = cur["weather"][0]["description"].capitalize()
-        now_wind = round(cur["wind"]["speed"])
-        now_gust = round(cur["wind"].get("gust", cur["wind"]["speed"]))
-        now_rain = cur.get("rain", {}).get("1h", 0)
-        now_snow = cur.get("snow", {}).get("1h", 0)
-        now_precip = f" 🌧️{now_rain:.1f}мм" if now_rain > 0 else f" ❄️{now_snow:.1f}мм" if now_snow > 0 else ""
+        cur = d["current"]
+        hourly = d["hourly"]
+        now_temp = round(cur["temperature_2m"])
+        now_code = cur["weathercode"]
+        now_wind = round(cur["windspeed_10m"])
+        now_desc = WMO.get(now_code, "")
+        now_precip = cur.get("precipitation", 0)
+        precip_str = f" 🌧️{now_precip:.1f}мм" if now_precip and now_precip > 0 else ""
 
-        day_item = None
-        eve_item = None
-        for item in fc.get("list", []):
-            dt_txt = item.get("dt_txt", "")
-            hour = int(dt_txt[11:13]) if len(dt_txt) >= 13 else 0
-            if day_item is None and hour in (12, 13, 14, 15):
-                day_item = item
-            if eve_item is None and hour in (18, 19, 20, 21):
-                eve_item = item
+        times = hourly["time"]
+        temps = hourly["temperature_2m"]
+        codes = hourly["weathercode"]
+        winds = hourly["windspeed_10m"]
+
+        def _get_hour(target_h):
+            for i, t in enumerate(times):
+                h = int(t[11:13])
+                if h >= target_h:
+                    return temps[i], codes[i], winds[i]
+            return None, None, None
 
         out = []
-        out.append(f"🌤 Сейчас {_icon(now_desc)} {now_temp}°C, {now_desc.lower()}, ветер {now_wind} м/с{now_precip}")
+        out.append(f"{_icon(now_code)} Сейчас {now_temp}°C, {now_desc}, ветер {now_wind} м/с{precip_str}")
 
-        if day_item:
-            d_temp = round(day_item["main"]["temp"])
-            d_desc = day_item["weather"][0]["description"].capitalize()
-            d_wind = round(day_item["wind"]["speed"])
-            d_precip = _precip(day_item)
-            out.append(f"🌤 Днём {_icon(d_desc)} {d_temp}°C, {d_desc.lower()}, ветер {d_wind} м/с{d_precip}")
+        d_temp, d_code, d_wind = _get_hour(13)
+        if d_temp is not None:
+            out.append(f"{_icon(d_code)} Днём {round(d_temp)}°C, {WMO.get(d_code,'')}, ветер {round(d_wind)} м/с")
 
-        if eve_item:
-            e_temp = round(eve_item["main"]["temp"])
-            e_desc = eve_item["weather"][0]["description"].capitalize()
-            e_wind = round(eve_item["wind"]["speed"])
-            e_precip = _precip(eve_item)
-            out.append(f"🌤 Вечером {_icon(e_desc)} {e_temp}°C, {e_desc.lower()}, ветер {e_wind} м/с{e_precip}")
+        e_temp, e_code, e_wind = _get_hour(19)
+        if e_temp is not None:
+            out.append(f"{_icon(e_code)} Вечером {round(e_temp)}°C, {WMO.get(e_code,'')}, ветер {round(e_wind)} м/с")
 
-        return "\n".join(out)
+        return "
+".join(out)
 
     except Exception as e:
         print(f"Weather fetch error: {e}")
         return ""
-
 MORNING_SENT_FILE = "data/morning_sent.json"
 
 
-EVENING_SENT_FILE = "data/evening_sent.json"
 
 def _is_evening_sent() -> bool:
     try:
@@ -1320,12 +1171,8 @@ async def send_morning_briefing(bot, chat_id: int):
         schedule = await _retry(_fetch_schedule_fresh_or_cache) or []
         tasks = get_pending_tasks()
         now = datetime.datetime.now(tz=UFA_TZ)
-        MONTHS = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
-        DAYS = ["понедельник","вторник","среда","четверг","пятница","суббота","воскресенье"]
-        DAY_NAMES = ["понедельник","вторник","среда","четверг","пятница","суббота","воскресенье"]
-        MONTHS = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
         SEP = "┄" * 20
-        day_str = f"{DAY_NAMES[now.weekday()].capitalize()}, {now.day} {MONTHS[now.month-1]}"
+        day_str = f"{DAYS_RU[now.weekday()].capitalize()}, {now.day} {MONTHS_RU[now.month-1]}"
         border = "═" * 26
         pad = "   "
         lines = [
@@ -1462,15 +1309,13 @@ async def send_midday_briefing(bot, chat_id: int):
 
         tasks = get_pending_tasks()
         now = datetime.datetime.now(tz=UFA_TZ)
-        MONTHS = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
-        DAYS = ["понедельник","вторник","среда","четверг","пятница","суббота","воскресенье"]
         SEP = "┄" * 20
         border = "═" * 26
         pad = "   "
 
         lines = [
             f"🌞 *Добрый день, {USER_NAME}!*",
-            f"{DAYS[now.weekday()].capitalize()}, {now.day} {MONTHS[now.month-1]}",
+            f"{DAYS_RU[now.weekday()].capitalize()}, {now.day} {MONTHS_RU[now.month-1]}",
             "",
         ]
 
@@ -1578,10 +1423,7 @@ async def send_evening_briefing(bot, chat_id: int):
         today = now.date()
         tomorrow = (now + datetime.timedelta(days=1)).date()
         after_tomorrow = (now + datetime.timedelta(days=2)).date()
-
-        MONTHS = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
-        DAYS = ["понедельник","вторник","среда","четверг","пятница","суббота","воскресенье"]
-        tom_str = f"{tomorrow.day} {MONTHS[tomorrow.month-1]}, {DAYS[tomorrow.weekday()]}"
+        tom_str = f"{tomorrow.day} {MONTHS_RU[tomorrow.month-1]}, {DAYS_RU[tomorrow.weekday()]}"
 
         # Расписание завтра
         schedule_tomorrow = await _fetch_tomorrow_schedule()
@@ -1640,7 +1482,7 @@ async def send_evening_briefing(bot, chat_id: int):
         pad = "   "
         lines = [
             f"🌙 *Добрый вечер, {USER_NAME}!*",
-            f"{now.day} {MONTHS[now.month-1]}, {DAYS[now.weekday()]}",
+            f"{now.day} {MONTHS_RU[now.month-1]}, {DAYS_RU[now.weekday()]}",
             "",
         ]
 

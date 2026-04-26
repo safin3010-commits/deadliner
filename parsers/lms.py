@@ -69,7 +69,7 @@ def _is_graded(grade_text: str) -> bool:
 
 
 
-async def fetch_lms_deadlines() -> list:
+async def fetch_lms_deadlines() -> tuple:
     print("LMS: начинаем парсинг...")
 
     async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=HEADERS) as client:

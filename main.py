@@ -1,7 +1,8 @@
 import os, sys
 
 # ── Один экземпляр ──
-_PID_FILE = "/tmp/deadliner.pid"
+import tempfile as _tempfile
+_PID_FILE = _tempfile.gettempdir() + "/deadliner.pid"
 if os.path.exists(_PID_FILE):
     try:
         _old_pid = int(open(_PID_FILE).read().strip())

@@ -1287,6 +1287,10 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Проверяем не запущен ли уже
+    import platform as _pl
+    if _pl.system() == "Windows":
+        await update.message.reply_text("ℹ️ На Windows автомониторинг недоступен.\nПередай URL теста: /quiz https://lms.utmn.ru/mod/quiz/attempt.php?attempt=...")
+        return
     result = subprocess.run(["pgrep", "-f", "quiz_monitor.py"], capture_output=True, text=True)
     if result.stdout.strip():
         await update.message.reply_text(
