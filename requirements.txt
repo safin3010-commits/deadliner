@@ -9,7 +9,10 @@ python-dotenv>=1.0.0
 python-telegram-bot>=21.0
 pytz>=2024.1
 tzlocal>=5.0
-browser-cookie3==0.20.1
 requests>=2.31.0
 timezonefinder==6.5.9
 aiohttp>=3.9.0
+pycryptodomex>=3.9.0
+lz4>=4.0.0
+pycryptodomex>=3.9.0
+lz4>=4.0.0
