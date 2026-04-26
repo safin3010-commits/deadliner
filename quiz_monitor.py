@@ -21,11 +21,31 @@ _sent_attempts: set = set()
 
 def get_safari_url() -> str | None:
     try:
-        result = subprocess.run(
-            ["osascript", "-e", 'tell application "Google Chrome" to return URL of active tab of front window'],
-            capture_output=True, text=True, timeout=3
-        )
-        url = result.stdout.strip()
+        import sys
+        if sys.platform == "darwin":
+            # macOS — через osascript
+            result = subprocess.run(
+                ["osascript", "-e", 'tell application "Google Chrome" to return URL of active tab of front window'],
+                capture_output=True, text=True, timeout=3
+            )
+            url = result.stdout.strip()
+        elif sys.platform == "win32":
+            # Windows — через PowerShell
+            result = subprocess.run(
+                ["powershell", "-command",
+                 "(Get-Process chrome | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object -First 1).MainWindowTitle"],
+                capture_output=True, text=True, timeout=3
+            )
+            # На Windows получаем заголовок окна, не URL — используем pygetwindow как fallback
+            # Простейший вариант: читаем из буфера обмена если пользователь скопировал URL
+            url = ""
+        else:
+            # Linux — через xdotool
+            result = subprocess.run(
+                ["xdotool", "getactivewindow", "getwindowname"],
+                capture_output=True, text=True, timeout=3
+            )
+            url = ""
         return url if url and url.startswith("http") else None
     except Exception:
         return None
@@ -271,10 +291,10 @@ async def process_quiz(url: str):
 
 
 async def monitor():
-    import sys as _sys
     print("🔍 Мониторинг Chrome запущен")
     print("   Открывай тесты в Chrome — вопросы придут в Telegram")
     print("   Ctrl+C для остановки\n")
+
     # Сообщение отправляется из handlers.py
 
     last_url = None
