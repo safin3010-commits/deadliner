@@ -104,6 +104,7 @@ async def on_startup(app: Application):
 
     # Отправляем сообщение что бот запустился
     try:
+        from bot.keyboards import main_menu_keyboard
         await app.bot.send_message(
             chat_id=MY_TELEGRAM_ID,
             text=(
@@ -117,7 +118,8 @@ async def on_startup(app: Application):
                 "⚠ СЛЕЖКА АКТИВИРОВАНА\n"
                 "```"
             ),
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=main_menu_keyboard()
         )
     except Exception as e:
         print(f"Не удалось отправить стартовое сообщение: {e}")
