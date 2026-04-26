@@ -112,7 +112,7 @@ async def on_startup(app: Application):
 
     # Начальная синхронизация задач
     from scheduler import sync_all_tasks
-    asyncio.create_task(sync_all_tasks())
+    asyncio.create_task(sync_all_tasks(app.bot, MY_TELEGRAM_ID))
 
     # Отправляем сообщение что бот запустился
     try:

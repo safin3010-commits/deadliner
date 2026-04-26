@@ -274,6 +274,9 @@ async def send_with_retry(bot, chat_id: int, text: str, parse_mode: str = "Markd
 
 
 async def retry_pending_notifications(bot):
+    now_h = datetime.datetime.now(tz=UFA_TZ).hour
+    if 0 <= now_h < 9:
+        return
     pending = _load_pending_notifications()
     if not pending:
         return
@@ -1987,7 +1990,7 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
 
     # ВК мониторинг каждые 15 минут (8:00-22:00)
     scheduler.add_job(check_vk_and_notify, trigger="interval", minutes=15,
-                      args=[bot, chat_id], id="vk_monitor")
+                      args=[bot, chat_id], id="vk_monitor", max_instances=1, coalesce=True)
 
     # ── Фоновые джобы ──
     scheduler.add_job(check_grades_and_notify, trigger="interval", minutes=10,
@@ -1999,7 +2002,7 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
                       args=[bot, chat_id], id="mail_check")
     scheduler.add_job(check_messenger_and_notify, trigger="interval", minutes=5,
                       start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=2),
-                      args=[bot, chat_id], id="messenger_check")
+                      args=[bot, chat_id], id="messenger_check", max_instances=1, coalesce=True)
     scheduler.add_job(retry_pending_notifications, trigger="interval", minutes=10,
                       args=[bot], id="retry_notifications")
     scheduler.add_job(check_random_reminder, trigger="interval", minutes=5,
@@ -2007,7 +2010,7 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
     scheduler.add_job(check_user_reminders, trigger="interval", minutes=5,
                       args=[bot, chat_id], id="user_reminders")
     scheduler.add_job(sync_all_tasks, trigger="interval", minutes=30,
-                      args=[bot, chat_id], id="sync_tasks",
+                      args=[bot, chat_id], id="sync_tasks", max_instances=1, coalesce=True,
                       start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=5))
     scheduler.add_job(check_lesson_reminders, trigger="interval", minutes=5,
                       args=[bot, chat_id], id="lesson_reminders")

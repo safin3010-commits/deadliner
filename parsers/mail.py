@@ -153,7 +153,7 @@ def get_email_body(msg) -> str:
     return body.strip()
 
 
-async def fetch_new_emails() -> list:
+def _fetch_new_emails_sync() -> list:
     print("Mail: проверяем почту...")
     new_emails = []
 
@@ -218,6 +218,12 @@ async def fetch_new_emails() -> list:
     except imaplib.IMAP4.error as e:
         print(f"Mail IMAP error: {e}")
         return []
+
+
+async def fetch_new_emails() -> list:
+    """Async обёртка — запускаем синхронный IMAP в отдельном потоке."""
+    import asyncio as _asyncio
+    return await _asyncio.to_thread(_fetch_new_emails_sync)
     except Exception as e:
         print(f"Mail fetch failed: {e}")
         return []
