@@ -1015,17 +1015,42 @@ async def send_weekly_report(bot, chat_id: int):
         done = len([t for t in tasks if t.get("done")])
         pending = len([t for t in tasks if not t.get("done")])
         pct = int(done / max(done + pending, 1) * 100)
+        week_summary = get_stats_summary()
+        avg = get_weekly_done_avg()
 
-        await send_with_retry(bot, chat_id,
-            f"📊 *Недельный отчёт*\n\n"
-            f"✅ Выполнено: *{done}*\n"
-            f"📋 Осталось: *{pending}*\n"
-            f"📈 Выполнение: *{pct}%*"
-        )
+        # Просроченные
+        now = datetime.datetime.now(tz=UFA_TZ)
+        overdue = [t for t in tasks if not t.get("done") and t.get("deadline") and
+            (datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ) - now).days < 0]
+
+        lines = [
+            "📊 *Недельный отчёт*",
+            "",
+            f"✅ Выполнено: *{done}*",
+            f"📋 Осталось: *{pending}*",
+            f"📈 Выполнение: *{pct}%*",
+            f"📉 Среднее в день: *{avg}*",
+            "",
+        ]
+        if week_summary and week_summary != "нет данных":
+            lines.append("*📅 По дням:*")
+            lines.append(week_summary)
+            lines.append("")
+        if overdue:
+            lines.append(f"⚠️ Просроченных задач: *{len(overdue)}*")
+            for t in overdue[:3]:
+                course = t.get("course_name", "")[:25]
+                lines.append(f"  • {course} — {t.get('title','')[:40]}")
+            lines.append("")
+
+        await send_with_retry(bot, chat_id, "\n".join(lines))
 
         prompt = (
-            f"Итог недели: выполнено {done} из {done+pending} задач ({pct}%). "
-            f"Напиши 2 предложения: оцени неделю и дай один конкретный совет на следующую."
+            f"Итог недели студента {USER_NAME}: выполнено {done} из {done+pending} задач ({pct}%). "
+            f"Среднее в день: {avg}. Просроченных: {len(overdue)}. "
+            f"Статистика по дням:\n{week_summary}\n\n"
+            f"Напиши 3 предложения: оцени неделю честно, отметь тенденцию, дай конкретный совет на следующую. "
+            f"Без воды, по-русски."
         )
         grok_text = await ask_grok(prompt)
         if grok_text:
@@ -1207,26 +1232,30 @@ async def send_morning_briefing(bot, chat_id: int):
             try:
                 dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
                 days = (dt - now).days
-                if 0 <= days <= 1:
+                if days <= 3:
                     urgent.append((days, t))
             except Exception:
                 continue
         urgent.sort(key=lambda x: x[0])
 
-        if urgent:
-            has_today = any(d == 0 for d, _ in urgent)
-            has_tomorrow = any(d == 1 for d, _ in urgent)
-            if has_today and has_tomorrow:
-                dl_label = "СЕГОДНЯ И ЗАВТРА"
-            elif has_today:
+        overdue = [(d, t) for d, t in urgent if d < 0]
+        upcoming = [(d, t) for d, t in urgent if d >= 0]
+
+        if upcoming:
+            has_today = any(d == 0 for d, _ in upcoming)
+            has_tomorrow = any(d == 1 for d, _ in upcoming)
+            has_3days = any(d > 1 for d, _ in upcoming)
+            if has_today:
                 dl_label = "СЕГОДНЯ"
-            else:
+            elif has_tomorrow:
                 dl_label = "ЗАВТРА"
+            else:
+                dl_label = "БЛИЖАЙШИЕ"
             lines.append(f"*🔴 ДЕДЛАЙНЫ — {dl_label}*")
             lines.append(SEP)
             seen_titles = set()
             shown = 0
-            for days, t in urgent:
+            for days, t in upcoming:
                 title = t.get("title", "")
                 if title in seen_titles:
                     continue
@@ -1246,7 +1275,6 @@ async def send_morning_briefing(bot, chat_id: int):
             lines.append(f"*📚 ЗАДАНИЯ*")
             lines.append(SEP)
             lines.append(f"Всего: {len(tasks)}, срочных нет ✅")
-            # Показываем ближайшее задание
             now_iso = now.isoformat()
             nearest = sorted(
                 [t for t in tasks if t.get("deadline") and t["deadline"] >= now_iso],
@@ -1265,6 +1293,19 @@ async def send_morning_briefing(bot, chat_id: int):
                 lines.append(f"📌 Ближайшее: {prefix}{t['title'][:40]}  •  {date_str}")
         else:
             lines.append("✅ Все задания выполнены!")
+
+        if overdue:
+            lines.append("")
+            lines.append("⏰ *Есть просроченные задачи — возможно, их ещё можно сдать:*")
+            seen_titles = set()
+            for _, t in overdue[:3]:
+                title = t.get("title", "")
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                course = _short_course(t.get("course_name", ""))
+                prefix = f"{course} — " if course else ""
+                lines.append(f"  ⚠️ {prefix}{title}")
         # Цитата дня на русском
         try:
             import httpx as _httpx
@@ -1521,16 +1562,32 @@ async def send_evening_briefing(bot, chat_id: int):
                 if t.get("source") == "manual":
                     course = "Личная задача"
                 else:
-                    course = _short_course(t.get("course_name", ""))
-                lines.append(f"  🔴 {course} — {t['title'][:35]} _({label})_")
+                    course = t.get("course_name", "")
+                lines.append(f"  🔴 {course} — {t['title']} _({label})_")
             lines.append("")
 
         # Закрыть сегодня вечером
         if close_tonight:
             lines.append("🎯 *Закрой сегодня вечером:*")
             for t in close_tonight:
-                course = _short_course(t.get("course_name", ""))
-                lines.append(f"  • {course} — {t['title'][:35]}")
+                course = t.get("course_name", "")
+                title = t.get("title", "")
+                lines.append(f"  • {course} — {title}")
+            lines.append("")
+
+        # Просроченные задачи
+        overdue_evening = [t for t in pending if t.get("deadline") and
+            (datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ) - now).days < 0]
+        if overdue_evening:
+            lines.append("⏰ *Есть просроченные задачи — возможно, их ещё можно сдать:*")
+            seen_ov = set()
+            for t in overdue_evening[:3]:
+                title = t.get("title", "")
+                if title in seen_ov:
+                    continue
+                seen_ov.add(title)
+                course = t.get("course_name", "")
+                lines.append(f"  ⚠️ {course} — {title}")
             lines.append("")
 
         # Groq анализ
@@ -2117,8 +2174,8 @@ async def send_afternoon_reminder(bot, chat_id: int):
         if with_deadline:
             msg += "\n\n📌 *Ближайшие дедлайны:*"
             for days, t in with_deadline[:2]:
-                course = t.get("course_name", "")[:20]
-                title = t.get("title", "")[:35]
+                course = t.get("course_name", "")
+                title = t.get("title", "")
                 if days < 0:
                     when = "просрочено"
                 elif days == 0:
