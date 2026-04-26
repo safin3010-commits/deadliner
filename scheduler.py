@@ -1648,6 +1648,14 @@ async def send_evening_briefing(bot, chat_id: int):
         print(f"subject theory error: {e}")
 
 
+async def send_subject_theory_job(bot, chat_id: int):
+    try:
+        from study_theory import send_subject_theory
+        await send_subject_theory(bot, chat_id)
+    except Exception as e:
+        print(f"subject theory error: {e}")
+
+
 async def send_english_theory_job(bot, chat_id: int):
     try:
         from study_theory import send_english_theory
