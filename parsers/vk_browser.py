@@ -210,14 +210,11 @@ async def fetch_todays_vk_messages() -> list:
 
             print(f"VK: найдено {len(messages)} сообщений за сегодня")
 
+            today_str = datetime.datetime.now(tz=UFA_TZ).strftime("%Y-%m-%d")
             new_messages = []
             for text in messages:
                 if len(text.strip()) < 20:
                     continue
-                # Отправляем только сообщения со ссылками
-                if "http://" not in text and "https://" not in text:
-                    continue
-                today_str = datetime.datetime.now(tz=UFA_TZ).strftime("%Y-%m-%d")
                 msg_hash = hashlib.md5(f"{today_str}:{text[:150].strip()}".encode()).hexdigest()[:16]
                 if not _is_hash_seen(msg_hash):
                     new_messages.append({"text": text, "hash": msg_hash})
