@@ -217,7 +217,8 @@ async def fetch_todays_vk_messages() -> list:
                 # Отправляем только сообщения со ссылками
                 if "http://" not in text and "https://" not in text:
                     continue
-                msg_hash = hashlib.md5(text[:150].strip().encode()).hexdigest()[:16]
+                today_str = datetime.datetime.now(tz=UFA_TZ).strftime("%Y-%m-%d")
+                msg_hash = hashlib.md5(f"{today_str}:{text[:150].strip()}".encode()).hexdigest()[:16]
                 if not _is_hash_seen(msg_hash):
                     new_messages.append({"text": text, "hash": msg_hash})
 
