@@ -1284,6 +1284,7 @@ async def send_morning_briefing(bot, chat_id: int):
             lines.append(SEP)
             seen_titles = set()
             shown = 0
+            DAYS_SHORT = ["пн","вт","ср","чт","пт","сб","вс"]
             for days, t in upcoming:
                 title = t.get("title", "")
                 if title in seen_titles:
@@ -1291,12 +1292,15 @@ async def send_morning_briefing(bot, chat_id: int):
                 seen_titles.add(title)
                 try:
                     dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
-                    date_str = dt.strftime("%d.%m")
+                    date_str = f"{dt.strftime('%d.%m')} {DAYS_SHORT[dt.weekday()]}"
                 except Exception:
                     date_str = ""
                 course = _short_course(t.get("course_name", ""))
+                # Обрезаем длинные названия
+                if len(title) > 40:
+                    title = title[:37] + "…"
                 prefix = f"{course} — " if course else ""
-                lines.append(f"❗  {prefix}{title}  •  {date_str}")
+                lines.append(f"❗️  {date_str}  —  {prefix}{title}")
                 shown += 1
                 if shown >= 5:
                     break
@@ -1325,16 +1329,7 @@ async def send_morning_briefing(bot, chat_id: int):
 
         if overdue:
             lines.append("")
-            lines.append("⏰ *Есть просроченные задачи — возможно, их ещё можно сдать:*")
-            seen_titles = set()
-            for _, t in overdue[:3]:
-                title = t.get("title", "")
-                if title in seen_titles:
-                    continue
-                seen_titles.add(title)
-                course = _short_course(t.get("course_name", ""))
-                prefix = f"{course} — " if course else ""
-                lines.append(f"  ⚠️ {prefix}{title}")
+            lines.append(f"⚠️ Просрочено: {len(overdue)}")
         # Цитата дня на русском
         try:
             import httpx as _httpx
@@ -1405,27 +1400,29 @@ async def send_midday_briefing(bot, chat_id: int):
         )
         if nearest:
             t = nearest[0]
-            course = t.get("course_name", "")
+            from bot.messages import _short_course
+            course = _short_course(t.get("course_name", ""))
             title = t.get("title", "")
+            if len(title) > 40:
+                title = title[:37] + "…"
+            _days_short = ["пн","вт","ср","чт","пт","сб","вс"]
             try:
                 dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
                 days = (dt - now).days
-                if days < 0:
-                    when = "просрочено"
-                elif days == 0:
+                if days == 0:
                     when = "сегодня"
                 elif days == 1:
                     when = "завтра"
                 else:
                     when = f"через {days} дн."
-                date_str = dt.strftime("%d.%m")
+                date_str = f"{dt.strftime('%d.%m')} {_days_short[dt.weekday()]}"
             except Exception:
                 when = ""
                 date_str = ""
             lines.append(f"*📌 ЗАДАЧА ДНЯ*")
             lines.append(SEP)
-            lines.append(f"{course} — {title}")
-            lines.append(f"📅 Дедлайн: {date_str} _({when})_")
+            lines.append(f"❗️  {date_str}  —  {course} — {title}")
+            lines.append("")
             lines.append("")
             try:
                 prompt = (
@@ -1574,34 +1571,41 @@ async def send_evening_briefing(bot, chat_id: int):
             lines.append("  Пар нет 🎉")
         lines.append("")
 
+        _days_short = ["пн","вт","ср","чт","пт","сб","вс"]
         # Закрой до сна — самая ближайшая задача
         if upcoming_tasks:
             days_left, t = upcoming_tasks[0]
-            course = t.get("course_name", "")
+            from bot.messages import _short_course
+            course = _short_course(t.get("course_name", ""))
             title = t.get("title", "")
-            if days_left == 0:
-                when = "сегодня"
-            elif days_left == 1:
-                when = "завтра"
-            else:
-                when = f"через {days_left} дн."
+            if len(title) > 40:
+                title = title[:37] + "…"
+            try:
+                dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
+                date_str = f"{dt.strftime('%d.%m')} {_days_short[dt.weekday()]}"
+            except Exception:
+                date_str = ""
+            prefix = f"{course} — " if course else ""
             lines.append("🎯 *Закрой до сна:*")
-            lines.append(f"  {course} — {title} _({when})_")
+            lines.append(f"  ❗️  {date_str}  —  {prefix}{title}")
             lines.append("")
 
         # 3 ближайших задачи
         if len(upcoming_tasks) > 1:
             lines.append("📌 *Ближайшие задачи:*")
             for days_left, t in upcoming_tasks[1:4]:
-                course = t.get("course_name", "")
+                from bot.messages import _short_course
+                course = _short_course(t.get("course_name", ""))
                 title = t.get("title", "")
-                if days_left == 0:
-                    when = "сегодня"
-                elif days_left == 1:
-                    when = "завтра"
-                else:
-                    when = f"через {days_left} дн."
-                lines.append(f"  • {course} — {title} _({when})_")
+                if len(title) > 40:
+                    title = title[:37] + "…"
+                try:
+                    dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
+                    date_str = f"{dt.strftime('%d.%m')} {_days_short[dt.weekday()]}"
+                except Exception:
+                    date_str = ""
+                prefix = f"{course} — " if course else ""
+                lines.append(f"  • ❗️  {date_str}  —  {prefix}{title}")
             lines.append("")
 
         # Groq анализ
@@ -1630,16 +1634,26 @@ async def send_evening_briefing(bot, chat_id: int):
         except Exception as e:
             print(f"Groq evening analysis error: {e}")
 
-        # Анализ учёбы — коротко, 2 предложения
+        # Анализ учёбы — развёрнутый, каждый раз разный
         try:
             from parsers.study_analysis import fetch_study_analysis
             from grok import ask_grok as _ask_grok2
             raw = await fetch_study_analysis()
             if raw:
+                import random as _random
+                _angles = [
+                    "Сосредоточься на прогрессе: что улучшилось, что просело, дай конкретный совет на завтра.",
+                    "Сравни предметы между собой: где риск не закрыть, где всё хорошо, что срочно доделать.",
+                    "Оцени нагрузку: какой предмет требует больше всего внимания прямо сейчас и почему.",
+                    "Посмотри на посещаемость и баллы вместе: где пропуски влияют на оценку, что критично.",
+                    "Дай честную оценку недели: что радует, что тревожит, один конкретный шаг на завтра.",
+                ]
+                angle = _random.choice(_angles)
                 study_short = await _ask_grok2(
-                    f"Данные успеваемости студента {USER_NAME}:\n{raw}\n\n"
-                    f"Напиши ровно 2 предложения: лучший предмет и худший. Без воды.",
-                    system="Отвечай строго 2 предложениями на русском."
+                    f"Данные успеваемости студента {USER_NAME} (1 курс):\n{raw}\n\n"
+                    f"{angle}\n"
+                    f"3-4 предложения, конкретно, без воды, на русском. Каждый раз свежий взгляд.",
+                    system="Отвечай 3-4 предложениями на русском. Будь конкретным и честным."
                 )
                 if study_short:
                     lines.append(f"\n{'─' * 20}\n📊 *УЧЁБА*\n{study_short}")
@@ -1954,16 +1968,23 @@ async def send_afternoon_reminder(bot, chat_id: int):
 
         upcoming = [(d, t) for d, t in with_deadline if d >= 0]
         if upcoming:
-            msg += "\n\n───────────────────\n📚 *БЛИЖАЙШИЕ ДЕДЛАЙНЫ*"
+            _days_short = ["пн","вт","ср","чт","пт","сб","вс"]
+            deadline_lines = "───────────────────\n📚 *БЛИЖАЙШИЕ ДЕДЛАЙНЫ*"
             for days, t in upcoming[:3]:
                 title = t.get("title", "")
+                if len(title) > 40:
+                    title = title[:37] + "…"
+                from bot.messages import _short_course
+                course = _short_course(t.get("course_name", ""))
                 try:
                     dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
-                    date_str = dt.strftime("%d.%m")
+                    date_str = f"{dt.strftime('%d.%m')} {_days_short[dt.weekday()]}"
                 except Exception:
                     date_str = ""
-                msg += f"\n{date_str}  {title}"
-            msg += "\n───────────────────"
+                prefix = f"{course} — " if course else ""
+                deadline_lines += f"\n❗️  {date_str}  —  {prefix}{title}"
+            deadline_lines += "\n───────────────────"
+            msg = deadline_lines + "\n\n" + msg
 
         await send_with_retry(bot, chat_id, msg, parse_mode="Markdown")
         os.makedirs("data", exist_ok=True)

@@ -1,10 +1,5 @@
 [
   {
-    "rule": "Статичные глаголы (Stative Verbs)",
-    "category": "Глаголы",
-    "description": "Глаголы состояния не используются в Continuous: know, love, want, understand"
-  },
-  {
     "rule": "Модальный глагол can/could",
     "category": "Модальные глаголы",
     "description": "Способность, возможность, просьба"
