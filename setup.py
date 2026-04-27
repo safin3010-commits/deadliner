@@ -219,6 +219,65 @@ def install_playwright():
         print("  ✅ Playwright установлен")
 
 
+
+async def check_telegram_token(token: str) -> bool:
+    try:
+        import urllib.request, json
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/getMe",
+            headers={"User-Agent": "DeadlinerBot/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+            return data.get("ok", False)
+    except Exception as e:
+        print(f"  (ошибка проверки токена: {e})")
+        return False
+
+
+async def check_groq_key(key: str) -> bool:
+    try:
+        import urllib.request, json
+        req = urllib.request.Request(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {key}", "User-Agent": "DeadlinerBot/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status == 200
+    except Exception as e:
+        print(f"  (ошибка проверки Groq: {e})")
+        return False
+
+
+async def check_yandex_mail(email: str, password: str) -> bool:
+    try:
+        import imaplib
+        imap = imaplib.IMAP4_SSL("imap.yandex.ru", 993)
+        imap.login(email, password)
+        imap.logout()
+        return True
+    except Exception as e:
+        print(f"  (ошибка проверки почты: {e})")
+        return False
+
+
+def ask_with_retry(prompt: str, check_fn, service_name: str, hint: str = "") -> str:
+    """Запрашивает строку и проверяет её, с возможностью повтора."""
+    while True:
+        if hint:
+            print(f"  💡 {hint}")
+        val = ask(prompt)
+        print(f"  ⏳ Проверяю {service_name}...")
+        ok = asyncio.run(check_fn(val))
+        if ok:
+            print(f"  ✅ {service_name} — OK")
+            return val
+        else:
+            print(f"  ❌ {service_name} — не удалось подключиться")
+            retry = input("  Попробовать снова? (y/n): ").strip().lower()
+            if retry != "y":
+                return val
+
 def ask_city():
     while True:
         city = ask("Твой город (например: Уфа, Москва, Тюмень)")
@@ -263,8 +322,19 @@ def main():
     print("ОБЯЗАТЕЛЬНЫЕ НАСТРОЙКИ")
     print("━" * 44)
     name = ask("[1/4] Твоё имя (как бот будет к тебе обращаться)")
-    tg_token = ask("[2/4] Telegram токен (от @BotFather)")
-    tg_id = ask("[3/4] Твой Telegram ID (от @userinfobot)")
+    tg_token = ask_with_retry(
+        "[2/4] Telegram токен (от @BotFather)",
+        check_telegram_token,
+        "Telegram токен",
+        hint="Получи токен у @BotFather в Telegram → /newbot"
+    )
+    while True:
+        tg_id_raw = ask("[3/4] Твой Telegram ID (от @userinfobot)")
+        if tg_id_raw.isdigit():
+            tg_id = tg_id_raw
+            print("  ✅ Telegram ID — OK")
+            break
+        print("  ❌ ID должен быть числом. Узнай его у @userinfobot в Telegram.")
     print("[4/4] Город:")
     city, lat, lon, timezone = ask_city()
     print()
@@ -275,7 +345,25 @@ def main():
     print("━" * 44)
     print("  Groq (console.groq.com) — llama-3.3-70b, бесплатно")
     print("  Регистрация: https://console.groq.com")
-    groq_key = ask("Ключ Groq", required=False)
+    groq_key_raw = ask("Ключ Groq", required=False)
+    groq_key = ""
+    if groq_key_raw:
+        print("  ⏳ Проверяю Groq ключ...")
+        ok = asyncio.run(check_groq_key(groq_key_raw))
+        if ok:
+            print("  ✅ Groq — ключ рабочий")
+            groq_key = groq_key_raw
+        else:
+            print("  ❌ Groq — ключ не работает")
+            retry = input("  Ввести другой? (y/n): ").strip().lower()
+            if retry == "y":
+                groq_key_raw2 = ask("Ключ Groq (повтор)", required=False)
+                ok2 = asyncio.run(check_groq_key(groq_key_raw2)) if groq_key_raw2 else False
+                groq_key = groq_key_raw2 if ok2 else groq_key_raw
+                print("  ✅ Groq — OK" if ok2 else "  ⚠️  Сохранён как есть, проверь позже")
+            else:
+                groq_key = groq_key_raw
+                print("  ⚠️  Сохранён как есть, проверь позже в .env")
     print()
 
     # ── Учёба ──
@@ -309,7 +397,13 @@ def main():
     print("ЯНДЕКС ПОЧТА (опционально)")
     print("━" * 44)
     yandex_mail = ask("Яндекс почта (@yandex.ru)", required=False)
-    yandex_pass = ask("Пароль приложения (Яндекс ID → Безопасность)", required=False) if yandex_mail else ""
+    yandex_pass = ""
+    if yandex_mail:
+        yandex_pass = ask("Пароль приложения (Яндекс ID → Безопасность → Пароли приложений)", required=False)
+        if yandex_pass:
+            print("  ⏳ Проверяю Яндекс Почту...")
+            ok = asyncio.run(check_yandex_mail(yandex_mail, yandex_pass))
+            print("  ✅ Яндекс Почта — подключение успешно" if ok else "  ❌ Яндекс Почта — не удалось подключиться. Проверь пароль приложения в .env")
     print()
 
     # ── Яндекс Мессенджер ──

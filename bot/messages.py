@@ -452,6 +452,7 @@ def new_email_message(email_data: dict) -> str:
 
     return (
         f"📧 <b>Яндекс Почта</b>\n"
+        f"\n"
         f"📧 <b>Новое письмо</b>\n"
         f"{'─' * 20}\n"
         f"👤 <b>{sender}</b>\n"
@@ -495,14 +496,20 @@ def new_grade_message(grade: dict) -> str:
     except Exception:
         mark_emoji = "📝"
 
+    source_emoji = "📊" if grade.get("source") == "modeus" else "🎓"
     if old_g:
         change = f"*{old_g}* → *{g}*"
-        header = f"{mark_emoji} *Оценка изменена* — {source_name}"
+        notif_type = f"{mark_emoji} Оценка изменена"
     else:
         change = f"*{g}*"
-        header = f"{mark_emoji} *Новая оценка* — {source_name}"
+        notif_type = f"{mark_emoji} Новая оценка"
 
-    lines = [f"{header}\n"]
+    lines = [
+        f"{source_emoji} *{source_name}*",
+        f"",
+        f"{notif_type}",
+        f"{'─' * 20}",
+    ]
     lines.append(f"📚 {course}")
     if title:
         lines.append(f"📌 {title}")
@@ -529,7 +536,10 @@ def lesson_reminder(lesson: dict, minutes_before: int = 30) -> str:
     loc_str = f"\n📍 {location}" if location and "lxp" not in location.lower() else ""
     lxp_str = "\n🔵 _онлайн (LXP)_" if location and "lxp" in location.lower() else ""
     return (
-        f"🔔 *Через {minutes_before} минут пара{num_str}*\n\n"
+        f"🔔 *Modeus*\n"
+        f"\n"
+        f"🔔 *Через {minutes_before} минут пара{num_str}*\n"
+        f"{'─' * 20}\n"
         f"📖 {name}\n🕐 {start}{loc_str}{lxp_str}"
     )
 

@@ -1740,7 +1740,7 @@ async def _check_vk_and_notify_inner(bot, chat_id: int):
                 if not formatted:
                     formatted = vk_text
 
-                header = "<b>💬 ВКонтакте — Новое сообщение</b>\n" + "─" * 20
+                header = "<b>💬 ВКонтакте</b>\n\n<b>💬 Новое сообщение</b>\n" + "─" * 20
                 full_text = f"{header}\n\n{formatted}"
                 if len(full_text) > 4000:
                     full_text = full_text[:4000]
