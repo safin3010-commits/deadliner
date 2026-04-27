@@ -617,16 +617,32 @@ async def check_grades_and_notify(bot, chat_id: int):
         except Exception as e:
             print(f"Scheduler grades LMS error: {e}")
 
+        # Тихий старт — первые 20 минут только помечаем, не шлём
+        import time as _time2, json as _json2, os as _os2
+        _in_grace = False
+        try:
+            if _os2.path.exists("data/startup_grace.json"):
+                _grace = _json2.load(open("data/startup_grace.json"))
+                if _time2.time() - _grace.get("started_at", 0) < 1200:
+                    _in_grace = True
+        except Exception:
+            pass
+
         modeus_grades = await _retry(fetch_modeus_grades) or []
         for grade in modeus_grades:
             grade_key = f"modeus_grade:{grade.get('course','')[:30]}:{grade.get('value','')}:{grade.get('lesson_date','')[:10]}:{grade.get('id','')[-8:]}"
             if _is_notification_sent(grade_key):
                 continue
+            if _in_grace:
+                _mark_notification_sent(grade_key)
+                if "_seen" in grade:
+                    from parsers.modeus_grades import _save_seen
+                    _save_seen(grade["_seen"])
+                continue
             text = grade.get("_text") or format_grade_notification_new(grade)
-            sent_ok = await send_with_retry(bot, chat_id, _notify_header("🎓 Новая оценка — Modeus") + text)
+            sent_ok = await send_with_retry(bot, chat_id, text)
             if sent_ok:
                 _mark_notification_sent(grade_key)
-                # Сохраняем seen только после успешной отправки
                 if "_seen" in grade:
                     from parsers.modeus_grades import _save_seen
                     _save_seen(grade["_seen"])
@@ -836,7 +852,7 @@ async def check_lesson_reminders(bot, chat_id: int):
                 location = lesson.get("location", "")
                 start_str = start_dt.strftime("%H:%M")
 
-                text = f"🔔 *Пара через 15 минут!*\n\n📚 {name}\n🕐 Начало: {start_str}"
+                text = f"🔔 *Modeus*\n\n🔔 *Пара через 15 минут!*\n{'─' * 20}\n📚 {name}\n🕐 Начало: {start_str}"
                 if location:
                     text += f"\n📍 {location}"
 
@@ -1683,6 +1699,16 @@ async def check_lms_grades_and_notify(bot, chat_id: int):
         from bot.messages import format_lms_grade_notification
         from storage import get_tasks, save_tasks
 
+        import time as _time3, json as _json3, os as _os3
+        _in_grace_lms = False
+        try:
+            if _os3.path.exists("data/startup_grace.json"):
+                _grace3 = _json3.load(open("data/startup_grace.json"))
+                if _time3.time() - _grace3.get("started_at", 0) < 1200:
+                    _in_grace_lms = True
+        except Exception:
+            pass
+
         changes = await _retry(fetch_lms_grades_changes) or []
 
         if changes:
@@ -1691,8 +1717,18 @@ async def check_lms_grades_and_notify(bot, chat_id: int):
                 grade_key = f"lms_grade:{sent_key}"
                 if _is_notification_sent(grade_key):
                     continue
+                if _in_grace_lms:
+                    _mark_notification_sent(grade_key)
+                    try:
+                        from parsers.lms import _load_lms_grades_sent, _save_lms_grades_sent
+                        _sent = _load_lms_grades_sent()
+                        _sent.add(sent_key)
+                        _save_lms_grades_sent(_sent)
+                    except Exception:
+                        pass
+                    continue
                 text = format_lms_grade_notification(change)
-                sent_ok = await send_with_retry(bot, chat_id, _notify_header("🎓 Новая оценка — LMS") + text)
+                sent_ok = await send_with_retry(bot, chat_id, text)
                 if sent_ok:
                     _mark_notification_sent(grade_key)
                     try:

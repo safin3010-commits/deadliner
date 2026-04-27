@@ -110,15 +110,17 @@ async def on_startup(app: Application):
     # Сохраняем scheduler в bot_data чтобы потом остановить
     app.bot_data["scheduler"] = scheduler
 
-    # Тихий старт — помечаем время запуска, первые 20 мин не шлём спам
+    # Тихий старт — при запуске помечаем ВСЕ текущие оценки и задачи виденными
     import time as _time, json as _json, os as _os
     _os.makedirs("data", exist_ok=True)
     with open("data/startup_grace.json", "w") as _f:
         _json.dump({"started_at": _time.time()}, _f)
 
-    # Начальная синхронизация задач
-    from scheduler import sync_all_tasks
+    # Начальная синхронизация задач и оценок — без отправки (тихий старт активен)
+    from scheduler import sync_all_tasks, check_grades_and_notify, check_lms_grades_and_notify
     asyncio.create_task(sync_all_tasks(app.bot, MY_TELEGRAM_ID))
+    asyncio.create_task(check_grades_and_notify(app.bot, MY_TELEGRAM_ID))
+    asyncio.create_task(check_lms_grades_and_notify(app.bot, MY_TELEGRAM_ID))
 
     # Отправляем сообщение что бот запустился
     try:

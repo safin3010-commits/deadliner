@@ -430,8 +430,12 @@ def evening_reminder(tasks: list) -> str:
 def deadline_reminder(task: dict, days_left: int) -> str:
     emoji = "🔴" if days_left <= 1 else "🟡" if days_left <= 3 else "🟢"
     deadline = format_deadline(task.get("deadline", ""))
+    source = task.get("source", "").upper() or "LMS"
     return (
-        f"{emoji} *Напоминание о дедлайне*\n\n"
+        f"📌 *{source}*\n"
+        f"\n"
+        f"{emoji} *Напоминание о дедлайне*\n"
+        f"{'─' * 20}\n"
         f"📌 {task['title']}\n"
         f"📚 {_short_course(task.get('course_name', ''))}\n"
         f"⏰ {deadline}"
@@ -695,8 +699,11 @@ def format_grade_notification_new(grade: dict) -> str:
 
         mark_emoji = "🟢"
 
-        lines.append(f"🎓 *Новая запись в журнале — Modeus*\n")
-        lines.append(f"📚 *{course}*")
+        lines.append(f"🎓 *Modeus*")
+        lines.append(f"")
+        lines.append(f"🎓 *Новая запись в журнале*")
+        lines.append(f"{'─' * 20}")
+        lines.append(f"📚 {course}")
         if subject and subject != course:
             lines.append(f"📌 {subject}")
         if lesson_date:
@@ -712,16 +719,22 @@ def format_grade_notification_new(grade: dict) -> str:
             lines.append(f"\n📊 Текущий итог: *{grade['course_total']}*")
 
     elif grade_type == "current_total":
-        lines.append(f"📊 *Итог обновлён — Modeus*\n")
-        lines.append(f"📚 *{course}*")
+        lines.append(f"🎓 *Modeus*")
+        lines.append(f"")
+        lines.append(f"📊 *Итог обновлён*")
+        lines.append(f"{'─' * 20}")
+        lines.append(f"📚 {course}")
         change = f"*{old_value}* → *{value}*" if old_value else f"*{value}*"
         lines.append(f"🎯 {change}")
         if by:
             lines.append(f"👤 _{by}_")
 
     elif grade_type == "module_total":
-        lines.append(f"🏆 *Итог модуля — Modeus*\n")
-        lines.append(f"📚 *{course}*")
+        lines.append(f"🎓 *Modeus*")
+        lines.append(f"")
+        lines.append(f"🏆 *Итог модуля*")
+        lines.append(f"{'─' * 20}")
+        lines.append(f"📚 {course}")
         lines.append(f"🎯 *{value}*")
 
     return "\n".join(lines)
