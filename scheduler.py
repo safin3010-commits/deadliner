@@ -992,24 +992,9 @@ async def _send_random_motivation(bot, chat_id: int):
             )
             ai_line = await ask_grok(prompt)
 
-        # Цитата великого человека — ZenQuotes
-        quote_text = ""
+        # Цитата из файла
+        quote_text = _get_quote()
         quote_author = ""
-        try:
-            import httpx as _httpx
-            async with _httpx.AsyncClient(timeout=8, follow_redirects=True) as _client:
-                _r = await _client.get("https://zenquotes.io/api/random")
-                if _r.status_code == 200:
-                    _data = _r.json()[0]
-                    quote_en = _data.get("q", "").strip()
-                    quote_author = _data.get("a", "").strip()
-                    if quote_en:
-                        translated = await ask_grok(
-                            f"Переведи эту мотивационную цитату на русский, сохрани смысл и стиль. Только перевод без кавычек и пояснений:\n{quote_en}"
-                        )
-                        quote_text = translated if translated else quote_en
-        except Exception as e:
-            print(f"ZenQuotes motivation error: {e}")
 
         lines = ["⚡️ *Не расслабляйся*", ""]
 
@@ -1330,24 +1315,10 @@ async def send_morning_briefing(bot, chat_id: int):
         if overdue:
             lines.append("")
             lines.append(f"⚠️ Просрочено: {len(overdue)}")
-        # Цитата дня на русском
-        try:
-            import httpx as _httpx
-            async with _httpx.AsyncClient(timeout=8) as _client:
-                _r = await _client.get(
-                    "http://api.forismatic.com/api/1.0/",
-                    params={"method": "getQuote", "lang": "ru", "format": "json"}
-                )
-                if _r.status_code == 200:
-                    _data = _r.json()
-                    _quote = _data.get("quoteText", "").strip()
-                    _author = _data.get("quoteAuthor", "").strip()
-                    if _quote:
-                        lines.append(f"\n{'─' * 20}\n💬 {_quote}")
-                        if _author:
-                            lines.append(f"— {_author}")
-        except Exception as e:
-            print(f"Forismatic morning error: {e}")
+        # Цитата из файла
+        _quote = _get_quote()
+        if _quote:
+            lines.append(f"\n{'─' * 20}\n💬 {_quote}")
 
         await send_with_retry(bot, chat_id, "\n".join(lines))
         _mark_morning_sent()
@@ -1440,29 +1411,11 @@ async def send_midday_briefing(bot, chat_id: int):
             lines.append("✅ Активных задач нет")
             lines.append("")
 
-        # Цитата дня на русском
-        _quote = ""
-        _author = ""
-        try:
-            import httpx as _httpx
-            async with _httpx.AsyncClient(timeout=8) as _client:
-                _r = await _client.get(
-                    "http://api.forismatic.com/api/1.0/",
-                    params={"method": "getQuote", "lang": "ru", "format": "json"}
-                )
-                if _r.status_code == 200:
-                    _data = _r.json()
-                    _quote = _data.get("quoteText", "").strip()
-                    _author = _data.get("quoteAuthor", "").strip()
-        except Exception:
-            pass
-        if not _quote:
-            _quote = _get_quote()
+        # Цитата из файла
+        _quote = _get_quote()
         if _quote:
             lines.append(f"{'─' * 20}")
             lines.append(f"💬 {_quote}")
-            if _author:
-                lines.append(f"— {_author}")
 
         await send_with_retry(bot, chat_id, "\n".join(lines))
         _mark_midday_sent()
