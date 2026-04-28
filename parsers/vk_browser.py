@@ -181,14 +181,12 @@ async def fetch_todays_vk_messages() -> list:
 
                     for (const child of todayStack.children) {
                         const cls = child.className || '';
+                        // Пропускаем разделитель даты
                         if (cls.includes('StickyDateSeparator')) continue;
+                        // Пропускаем системные уведомления о закреплении
                         const text = (child.innerText || '').trim();
                         if (text.includes('закрепило сообщение') || text.includes('закрепил сообщение')) continue;
                         if (text.length < 20) continue;
-
-                        // Берём itemkey как стабильный ID
-                        const inner = child.querySelector('[data-itemkey]');
-                        const itemKey = inner ? inner.getAttribute('data-itemkey') : null;
 
                         // Собираем ссылки
                         let fullText = text;
@@ -198,7 +196,7 @@ async def fetch_todays_vk_messages() -> list:
                                 fullText += ' ' + href;
                             }
                         });
-                        results.push({text: fullText, itemKey: itemKey});
+                        results.push(fullText);
                     }
                     return results;
                 }
