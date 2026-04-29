@@ -223,7 +223,8 @@ def _fetch_new_emails_sync() -> list:
 async def fetch_new_emails() -> list:
     """Async обёртка — запускаем синхронный IMAP в отдельном потоке."""
     import asyncio as _asyncio
-    return await _asyncio.to_thread(_fetch_new_emails_sync)
+    try:
+        return await _asyncio.to_thread(_fetch_new_emails_sync)
     except Exception as e:
         print(f"Mail fetch failed: {e}")
         return []
