@@ -629,6 +629,7 @@ async def check_grades_and_notify(bot, chat_id: int):
             pass
 
         modeus_grades = await _retry(fetch_modeus_grades) or []
+        last_seen = None
         for grade in modeus_grades:
             grade_key = f"modeus_grade:{grade.get('course','')[:30]}:{grade.get('value','')}:{grade.get('lesson_date','')[:10]}:{grade.get('id','')[-8:]}"
             if _is_notification_sent(grade_key):
@@ -636,16 +637,18 @@ async def check_grades_and_notify(bot, chat_id: int):
             if _in_grace:
                 _mark_notification_sent(grade_key)
                 if "_seen" in grade:
-                    from parsers.modeus_grades import _save_seen
-                    _save_seen(grade["_seen"])
+                    last_seen = grade["_seen"]
                 continue
             text = grade.get("_text") or format_grade_notification_new(grade)
             sent_ok = await send_with_retry(bot, chat_id, text)
             if sent_ok:
                 _mark_notification_sent(grade_key)
                 if "_seen" in grade:
-                    from parsers.modeus_grades import _save_seen
-                    _save_seen(grade["_seen"])
+                    last_seen = grade["_seen"]
+        # Сохраняем seen только после отправки всех оценок
+        if last_seen is not None:
+            from parsers.modeus_grades import _save_seen
+            _save_seen(last_seen)
 
     except Exception as e:
         print(f"Scheduler grades check error: {e}")
@@ -691,7 +694,21 @@ async def _check_messenger_and_notify_inner(bot, chat_id: int):
         from bot.messages import new_messenger_message
         from bot.keyboards import task_from_message_keyboard
         from storage import add_seen_message
+        import time as _tm, json as _jm, os as _om
+        _in_grace_msg = False
+        try:
+            if _om.path.exists("data/startup_grace.json"):
+                _gm = _jm.load(open("data/startup_grace.json"))
+                if _tm.time() - _gm.get("started_at", 0) < 1200:
+                    _in_grace_msg = True
+        except Exception:
+            pass
         messages = await fetch_new_messages()
+        if _in_grace_msg:
+            from storage import add_seen_message as _asm
+            for msg in messages:
+                _asm(msg["id"])
+            return
         for msg in messages:
             try:
                 from grok import beautify_message
