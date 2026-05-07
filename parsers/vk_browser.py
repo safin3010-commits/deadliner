@@ -47,8 +47,12 @@ def _mark_hash_seen(msg_hash: str):
 
 
 def _decode_vk_links(text: str) -> str:
-    """Декодируем VK redirect ссылки в прямые."""
+    """
+    1. Декодируем vk.com/away.php редиректы в прямые ссылки
+    2. Убираем дублирующиеся ссылки в конце (vk.com/club..., повторные mts-link и т.д.)
+    """
     import re, urllib.parse
+
     def decode_link(m):
         url = m.group(0)
         if "vk.com/away.php" in url:
@@ -60,7 +64,36 @@ def _decode_vk_links(text: str) -> str:
             except Exception:
                 return url
         return url
-    return re.sub(r'https?://[^\s]+', decode_link, text)
+
+    # Сначала декодируем редиректы
+    text = re.sub(r'https?://[^\s]+', decode_link, text)
+
+    # Собираем все ссылки которые уже упомянуты в тексте (не в конце)
+    all_links = re.findall(r'https?://[^\s]+', text)
+
+    # Убираем ссылки-мусор в конце:
+    # vk.com/club... — ссылка на саму беседу, не нужна
+    # Повторные ссылки которые уже есть выше в тексте
+    seen = set()
+    def filter_link(m):
+        url = m.group(0)
+        # Убираем ссылки на vk.com/club (беседа)
+        if re.search(r'vk\.com/club\d+', url):
+            return ''
+        # Убираем vk.com/away.php которые не задекодировались
+        if 'vk.com/away.php' in url:
+            return ''
+        # Убираем дубли
+        if url in seen:
+            return ''
+        seen.add(url)
+        return url
+
+    text = re.sub(r'https?://[^\s]+', filter_link, text)
+    # Убираем повисшие пустые строки после удалённых ссылок
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'[ \t]+\n', '\n', text)
+    return text.strip()
 
 
 async def _format_with_ai(text: str) -> str:
@@ -69,54 +102,28 @@ async def _format_with_ai(text: str) -> str:
     try:
         from grok import ask_grok
         system = (
-            "Ты форматировщик расписания из ВКонтакте для Telegram HTML.\n"
-            "Убери: шапку группы, приветствие, легенду дисциплин, строки Сообщество закрепило, строки только с vk.com ссылками.\n"
-            "Оставь ВСЕ пары без исключения.\n\n"
-            "Формат вывода строго как в примере ниже:\n"
-            "<b>Расписание</b>\n"
-            "<b>24 апреля, пятница:</b>\n\n"
-            "📖 <b>06:30 (мск)</b>\n"
-            "<b>История России</b>. Скипина И.В.\n\n"
-            "💻 <b>15:40 (мск)</b>\n"
-            "<b>Математический анализ</b>. Практика. Кутузов А.С.\n"
-            "https://my.mts-link.ru/ссылка\n\n"
-            "Правила:\n"
-            "- Жирным ТОЛЬКО название предмета до первой точки, всё остальное обычный текст\n"
-            "- Иконки: 📖 лекция, 💻 практика/лаб, 🏃 физкультура, 🎯 ВППА, 🔵 LXP/асинхрон, 📝 остальное\n"
-            "- Ссылки my.mts-link.ru на отдельной строке\n"
-            "- Пустая строка между парами\n"
-            "- Никаких пояснений — только текст"
+            "Ты форматировщик текста для Telegram. "
+            "Твоя единственная задача — сделать текст красивым для чтения в Telegram HTML, "
+            "НЕ изменяя содержимое ни на одну букву.\n\n"
+            "СТРОГИЕ ПРАВИЛА:\n"
+            "1. Не меняй, не убирай, не добавляй ни одного слова из оригинала\n"
+            "2. Не перефразируй и не переставляй предложения\n"
+            "3. Весь оригинальный текст должен присутствовать дословно\n"
+            "4. Используй только Telegram HTML теги: <b>жирный</b>, <i>курсив</i>\n\n"
+            "ЧТО ДЕЛАТЬ:\n"
+            "- Сделай жирным заголовки, даты, названия, важные слова\n"
+            "- Добавь пустые строки между смысловыми блоками для читаемости\n"
+            "- Убери лишние пробелы и двойные переносы строк\n"
+            "- Верни текст готовым для отправки в Telegram\n\n"
+            "Никаких пояснений — только отформатированный текст."
         )
         result = await ask_grok(text, system=system)
         if result:
-            import re
-            # Фикс 1: дата на двух строках если AI склеил
-            result = re.sub(
-                r'<b>Расписание\s+(\d[^<]+)</b>',
-                r'<b>Расписание</b>\n<b>\1</b>',
-                result
-            )
-            # Фикс 2: убираем жирный с преподавателей
-            # Строка вида <b>Название. Преподаватель.</b> -> <b>Название</b>. Преподаватель.
-            def fix_bold(m):
-                inner = m.group(1)
-                dot_pos = inner.find('.')
-                if dot_pos > 0:
-                    return f'<b>{inner[:dot_pos]}</b>{inner[dot_pos:]}'
-                return m.group(0)
-            result = re.sub(r'<b>([^<]{10,})</b>', fix_bold, result)
             return result
     except Exception as e:
         print(f"VK format AI error: {e}")
-    # Фоллбэк
-    lines = text.strip().split("\n")
-    while lines:
-        last = lines[-1].strip()
-        if (re.match(r"^\d{1,2}:\d{2}", last) and "vk.com" in last) or re.match(r"^https?://vk\.com", last):
-            lines.pop()
-        else:
-            break
-    return "\n".join(lines).strip()
+    # Фоллбэк — возвращаем оригинал без изменений
+    return text.strip()
 
 
 async def fetch_todays_vk_messages() -> list:

@@ -3,6 +3,27 @@ import os
 from typing import Any
 from config import TASKS_FILE, SEEN_MESSAGES_FILE, TOKENS_FILE, DATA_DIR
 
+
+QUIZ_ACTIVE_FILE = "data/quiz_active.json"
+
+def set_quiz_active(active: bool):
+    """Включаем/выключаем режим квиза — блокирует LMS парсинг."""
+    import os
+    os.makedirs("data", exist_ok=True)
+    with open(QUIZ_ACTIVE_FILE, "w") as f:
+        import json
+        json.dump({"active": active}, f)
+
+def is_quiz_active() -> bool:
+    """Проверяем активен ли квиз."""
+    try:
+        import json
+        with open(QUIZ_ACTIVE_FILE) as f:
+            return json.load(f).get("active", False)
+    except Exception:
+        return False
+
+
 def ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -38,6 +59,9 @@ def add_task(title: str, deadline: str | None, source: str) -> dict:
                 max_id = tid
         except (ValueError, TypeError):
             pass
+    # Единый стиль: первая буква заглавная, остальное как есть
+    if title:
+        title = title[0].upper() + title[1:]
     task = {
         "id": max_id + 1,
         "title": title,

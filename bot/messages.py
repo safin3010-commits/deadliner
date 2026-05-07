@@ -74,7 +74,9 @@ def _deadline_emoji(deadline_str: str | None) -> str:
     try:
         dt = datetime.datetime.fromisoformat(deadline_str).astimezone(UFA_TZ)
         days = (dt - datetime.datetime.now(tz=UFA_TZ)).days
-        if days <= 2:
+        if days < 0:
+            return "⏰"
+        elif days <= 2:
             return "🔴"
         elif days <= 7:
             return "🟡"
@@ -108,7 +110,7 @@ def _format_date(deadline_str: str | None) -> str:
 
 def _get_filtered_tasks(tasks: list, filter_type: str) -> list:
     """Возвращает список незавершённых задач. Ручные (manual) — всегда выше."""
-    pending = [t for t in tasks if not t.get("done")]
+    pending = [t for t in tasks if not t.get("done") and t.get("source") != "reminder_only"]
     now = datetime.datetime.now(tz=UFA_TZ)
 
     def days_left(t):
@@ -166,7 +168,16 @@ def tasks_list_filtered(tasks: list, filter_type: str) -> str:
         return empty
 
     # Итоговая строка
-    total_pending = len([t for t in tasks if not t.get("done")])
+    import datetime as _dt2
+    _now2 = _dt2.datetime.now(tz=UFA_TZ)
+    total_pending = len([
+        t for t in tasks if not t.get("done")
+        and t.get("source") != "reminder_only"
+        and (
+            not t.get("deadline") or
+            (_dt2.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ) - _now2).days >= -10
+        )
+    ])
     total_done = len([t for t in tasks if t.get("done")])
 
     # Группируем по курсу
@@ -198,7 +209,61 @@ def tasks_list_filtered(tasks: list, filter_type: str) -> str:
                 lines.append(f"  📌 {title}")
 
         lines.append("")
-    lines.append(f"_Показано: {len(filtered)} | Всего невыполнено: {total_pending} | Выполнено: {total_done}_")
+    lines.append(f"_Невыполнено: {total_pending}_")
+
+    # Блок активных напоминаний
+    try:
+        import sys as _sys
+        _sys.path.insert(0, ".")
+        from reminders import get_all_reminders
+        active = get_all_reminders()
+        if active:
+            lines.append("")
+            lines.append("🔔 *Активные напоминания*")
+            _now3 = _dt2.datetime.now(tz=UFA_TZ)
+            for r in active:
+                _title = r.get("task_title", "")[:35]
+                _times = r.get("times_left", 0)
+                _interval = r.get("interval_minutes", 0)
+                try:
+                    _next = _dt2.datetime.fromisoformat(r["next_at"]).astimezone(UFA_TZ)
+                    _delta = _next - _now3
+                    _mins = int(_delta.total_seconds() / 60)
+                    _time_str = _next.strftime("%H:%M")
+                    if _mins >= 0:
+                        # Будущее — показываем время + сколько осталось
+                        if _mins < 60:
+                            _left = f"через {_mins} мин"
+                        elif _mins < 1440:
+                            _h2 = _mins // 60
+                            _m2 = _mins % 60
+                            _left = f"через {_h2}ч {_m2}мин" if _m2 else f"через {_h2} ч"
+                        else:
+                            _days2 = _mins // 1440
+                            _left = f"через {_days2} дн."
+                            _time_str = _next.strftime("%d.%m %H:%M")
+                        _when = f"{_time_str} ({_left})"
+                    elif _mins >= -10:
+                        # Только что должно было сработать — ждёт проверки планировщика
+                        _when = f"{_time_str} (скоро)"
+                    else:
+                        # Давно просрочено — бот был выключен
+                        _when = f"{_time_str} (ожидает)"
+                except Exception:
+                    _when = "—"
+                if _times == 1 or _interval == 0:
+                    _repeat = ""
+                elif _interval < 60:
+                    _repeat = f", каждые {_interval} мин × {_times}"
+                elif _interval == 60:
+                    _repeat = f", каждый час × {_times}"
+                elif _interval % 60 == 0:
+                    _repeat = f", каждые {_interval // 60} ч × {_times}"
+                else:
+                    _repeat = f", × {_times}"
+                lines.append(f"  ⏰ {_title} — _{_when}{_repeat}_")
+    except Exception:
+        pass
 
     return "\n".join(lines)
 

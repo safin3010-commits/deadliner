@@ -99,6 +99,9 @@ async def on_startup(app: Application):
 
     # Создаём папку data если нет
     ensure_data_dir()
+    # Сбрасываем флаг квиза на старте — на случай если бот упал во время квиза
+    from storage import set_quiz_active
+    set_quiz_active(False)
 
     # Проверяем настройки .env
     await check_setup(app.bot)

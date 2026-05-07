@@ -4,8 +4,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMa
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
     keyboard = [
         [KeyboardButton("📋 Задания"), KeyboardButton("📅 Расписание")],
-        [KeyboardButton("➕ Добавить задачу"), KeyboardButton("🔄 Синхронизировать")],
-        [KeyboardButton("🎓 Оценки"), KeyboardButton("🔔 Напомнить")],
+        [KeyboardButton("🎓 Оценки")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
@@ -13,23 +12,23 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
 def tasks_filter_keyboard() -> InlineKeyboardMarkup:
     keyboard = [[
         InlineKeyboardButton("🔴 Срочные", callback_data="tasks:urgent"),
-        InlineKeyboardButton("🟢 Все", callback_data="tasks:all"),
     ]]
     return InlineKeyboardMarkup(keyboard)
 
 
 def tasks_filter_with_done_keyboard(filter_type: str) -> InlineKeyboardMarkup:
+    from reminders import get_all_reminders
+    has_reminders = bool(get_all_reminders())
     keyboard = [
         [InlineKeyboardButton("✅ Отметить выполненным", callback_data=f"done_pick:{filter_type}")],
         [
             InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_pick:{filter_type}"),
             InlineKeyboardButton("🗑 Удалить", callback_data=f"delete_pick:{filter_type}"),
         ],
-        [
-            InlineKeyboardButton("🔴 Срочные", callback_data="tasks:urgent"),
-            InlineKeyboardButton("🟢 Все", callback_data="tasks:all"),
-        ],
+        [InlineKeyboardButton("🔴 Срочные", callback_data="tasks:urgent")],
     ]
+    if has_reminders:
+        keyboard.append([InlineKeyboardButton("🔔 Управлять напоминаниями", callback_data=f"remind_from_tasks:{filter_type}")])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -225,20 +224,29 @@ def reminder_task_keyboard(tasks: list, page: int = 0) -> InlineKeyboardMarkup:
 
 
 def active_reminders_keyboard(reminders_list: list) -> InlineKeyboardMarkup:
-    """Активные напоминания с кнопкой удаления."""
+    """Одна кнопка на напоминание: нажать = удалить."""
+    import datetime
+    from config import UFA_TZ
+    now = datetime.datetime.now(tz=UFA_TZ)
     keyboard = []
     for r in reminders_list:
+        title = r.get("task_title", "")[:22]
+        times = r.get("times_left", 1)
         try:
-            mins = r["interval_minutes"]
-            if mins < 60:
-                interval_str = f"каждые {mins} мин"
-            elif mins == 60:
-                interval_str = "каждый час"
+            next_at = datetime.datetime.fromisoformat(r["next_at"]).astimezone(UFA_TZ)
+            mins_left = int((next_at - now).total_seconds() / 60)
+            if mins_left < 0:
+                when = next_at.strftime("%H:%M")
+            elif mins_left < 60:
+                when = f"{next_at.strftime('%H:%M')} ({mins_left}м)"
+            elif mins_left < 1440:
+                when = f"{next_at.strftime('%H:%M')} ({mins_left//60}ч)"
             else:
-                interval_str = f"каждые {mins//60} ч"
+                when = next_at.strftime("%d.%m %H:%M")
         except Exception:
-            interval_str = ""
-        label = f"🗑 {r['task_title'][:25]} ({interval_str}, ×{r['times_left']})"
+            when = "—"
+        repeat = f" ×{times}" if times > 1 else ""
+        label = f"⏰ {title} — {when}{repeat}  🗑"
         keyboard.append([InlineKeyboardButton(label, callback_data=f"remind_del:{r['id']}")])
     keyboard.append([InlineKeyboardButton("✖️ Закрыть", callback_data="cancel")])
     return InlineKeyboardMarkup(keyboard)

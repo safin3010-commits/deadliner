@@ -25,6 +25,11 @@ def _save(data: list):
 def add_reminder(task_id: str, task_title: str, interval_minutes: int, times: int, start_at: str = None) -> dict:
     reminders = _load()
     now = datetime.datetime.now(tz=UFA_TZ)
+    # Не создаём дубль — если напоминание на эту задачу уже есть
+    for existing in reminders:
+        if str(existing.get("task_id")) == str(task_id) and existing.get("times_left", 0) > 0:
+            print(f"Reminder: дубль для task_id={task_id} пропущен")
+            return existing
     if start_at:
         try:
             first_fire = datetime.datetime.fromisoformat(start_at)
@@ -69,7 +74,14 @@ def mark_sent(reminder_id: str):
         if r["id"] == reminder_id:
             r["times_left"] -= 1
             if r["times_left"] > 0:
-                r["next_at"] = (now + datetime.timedelta(minutes=r["interval_minutes"])).isoformat()
+                interval = r.get("interval_minutes", 0)
+                if interval > 0:
+                    r["next_at"] = (now + datetime.timedelta(minutes=interval)).isoformat()
+                else:
+                    # interval=0 — однократное, не зацикливаем
+                    r["times_left"] = 0
+                    # не добавляем в updated — напоминание удалится
+                    continue
                 updated.append(r)
         else:
             updated.append(r)
@@ -85,7 +97,11 @@ def delete_reminder(reminder_id: str):
     _save(reminders)
 
 
-def format_interval(minutes: int) -> str:
+def format_interval(minutes: int, times: int = 0) -> str:
+    if times == 1:
+        return "однократно"
+    if minutes == 0:
+        return "однократно"
     if minutes < 60:
         return f"каждые {minutes} мин"
     elif minutes == 60:

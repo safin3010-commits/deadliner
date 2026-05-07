@@ -440,195 +440,507 @@ async def _send_long_message(bot, chat_id: int, text: str, parse_mode: str = Non
         if part:
             await bot.send_message(chat_id=chat_id, text=_wrap_pre(part), parse_mode="HTML")
 
-async def send_subject_theory(bot, chat_id: int):
+
+IT_TOPICS_FILE = "data/it_topics.json"
+IT_TOPICS_INDEX_FILE = "data/it_topics_index.json"
+
+
+def _load_it_topics() -> list:
+    """Загружаем список IT тем из файла."""
+    try:
+        with open(IT_TOPICS_FILE, encoding="utf-8") as f:
+            import json as _j
+            return _j.load(f)
+    except Exception as e:
+        print(f"study_theory: не удалось загрузить it_topics.json: {e}")
+        return []
+
+
+def _get_next_it_topic() -> dict | None:
+    """Возвращает следующую тему по порядку. После последней — начинает сначала."""
+    topics = _load_it_topics()
+    if not topics:
+        return None
+    try:
+        with open(IT_TOPICS_INDEX_FILE) as f:
+            import json as _j
+            data = _j.load(f)
+        idx = data.get("index", 0) % len(topics)
+    except Exception:
+        idx = 0
+    topic = topics[idx]
+    import os as _os
+    _os.makedirs("data", exist_ok=True)
+    import json as _j
+    with open(IT_TOPICS_INDEX_FILE, "w") as f:
+        _j.dump({"index": (idx + 1) % len(topics)}, f)
+    return topic
+
+
+IT_PRACTICE_INDEX_FILE = "data/it_practice_index.json"
+IT_REVIEW_INDEX_FILE = "data/it_review_index.json"
+
+
+def _get_it_topic_by_offset(offset: int) -> dict | None:
+    """Возвращает тему по смещению от текущего индекса (для повторения)."""
+    topics = _load_it_topics()
+    if not topics:
+        return None
+    try:
+        with open(IT_TOPICS_INDEX_FILE) as f:
+            data = json.load(f)
+        current = data.get("index", 0)
+    except Exception:
+        current = 0
+    idx = (current - offset) % len(topics)
+    return topics[idx]
+
+
+async def send_it_theory(bot, chat_id: int):
+    """11:00 — новая IT тема, объяснение через аналогию."""
     try:
         from grok import ask_grok
-        schedule = await get_todays_schedule()
-        if not schedule:
+        topic_data = _get_next_it_topic()
+        if not topic_data:
+            print("study_theory: it_topics.json пуст или не найден")
             return
-        subject_key, lesson = _get_todays_priority_subject(schedule)
-        if not subject_key or not lesson:
-            return
-        seen = _load_seen()
-        if seen["subject_sent"].count(subject_key) >= 1:
-            return
-        seen["subject_sent"].append(subject_key)
-        _save_seen(seen)
-        course_name = lesson.get("course_name") or lesson.get("name") or ""
-        topic = lesson.get("name") or lesson.get("description") or course_name
-        no_repeat = _get_topics_history(seen)
-        prompt = (
-            f"Предмет: {course_name}\n"
-            f"Тема занятия: {topic}\n"
-            f"{no_repeat + chr(10) if no_repeat else ''}"
-            f"Если тема уже в запрещённом списке — возьми смежную подтему.\n\n"
-            f"Напиши теорию для студента 1 курса. Просто, понятно, как умный друг.\n\n"
-            f"Структура:\n"
-            f"📌 *ТЕМА — {{topic[:50]}}*\n\n"
-            f"*Что это такое* — 2-3 предложения простыми словами + аналогия из жизни\n\n"
-            f"*Основные понятия* — 2-3 ключевых термина с объяснением\n\n"
-            f"*Как работает* — конкретный пример разбор\n\n"
-            f"*Типичные ошибки* — 2 ошибки которые все делают\n\n"
-            f"*Зачем нужно* — реальное применение\n\n"
-            f"Правила форматирования:\n"
-            f"- *жирный* для заголовков и терминов\n"
-            f"- _курсив_ для примеров\n"
-            f"- НЕ используй ** двойные звёздочки\n"
-            f"- Между разделами пустая строка\n"
-            f"- Объём: строго 250-300 слов. Умещайся в одно сообщение Telegram."
-        )
+
+        topic = topic_data.get("topic", "")
+        section = topic_data.get("section", "")
+        topic_id = topic_data.get("id", "")
+
+        prompt = f"""Ты наставник по IT. Ученик — полный новичок, никогда не программировал.
+Раздел: {section}
+Тема: {topic}
+
+Напиши урок СТРОГО в таком формате — не отступай ни на символ:
+
+💡 *{topic}*
+_{section}_
+
+🎯 *Зачем тебе это знать:*
+[одно предложение — конкретная польза для аналитика или дата-сайентиста]
+
+🧠 *Простыми словами:*
+[объяснение через бытовую аналогию — кухня, игра, магазин, телефон. 3-4 коротких предложения. После каждой мысли — новая строка]
+
+⚙️ *Как это выглядит:*
+[если есть код — каждая строка на отдельной строке в `моноширинном`, после строки кода — краткий комментарий курсивом _что делает_. Если кода нет — конкретный жизненный пример по шагам]
+
+🔑 *Главные термины:*
+- *термин1* — объяснение одним предложением
+- *термин2* — объяснение одним предложением
+- *термин3* — объяснение одним предложением
+
+⚡️ *Запомни одно:*
+[одна фраза — суть темы, как другу в чате]
+
+ПРАВИЛА ФОРМАТИРОВАНИЯ — строго:
+- Между каждой секцией ОБЯЗАТЕЛЬНО пустая строка
+- Заголовок секции на отдельной строке, текст с новой строки
+- *жирный* только для заголовков и терминов
+- _курсив_ только для комментариев к коду и аналогий
+- Код — в одинарных кавычках `вот так`, каждая строка отдельно
+- НЕ используй ** двойные звёздочки
+- НЕ используй тройные кавычки
+- НЕ используй линии ━━━ или ---
+- Пиши живо и коротко, как старший друг
+- Объём: 200-230 слов"""
+
         theory = await ask_grok(
             prompt,
-            system="Ты преподаватель. Объясняй просто и понятно. Короткие предложения. Без воды.",
+            system="Ты наставник по IT для полных новичков. Всегда через аналогии и живые примеры. Обычный Telegram Markdown без тройных кавычек и линий.",
             smart=True
         )
         if not theory:
             return
-        _add_to_history(seen, f"{course_name[:20]}:{topic[:30]}")
-        _save_seen(seen)
-
-        SUBJECT_EMOJI = {"discrete": "🔢", "matan": "📐", "networks": "🌐", "history": "📜"}
-        emoji = SUBJECT_EMOJI.get(subject_key, "📚")
-        header = f"{emoji} *ТЕОРИЯ ДНЯ — {course_name[:40].upper()}*\n\n"
-        # Заменяем двойные звёздочки на одинарные
-        import re as _re
-        theory = _re.sub(r'\*\*(.+?)\*\*', r'*\1*', theory)
-        await _send_long_message(bot, chat_id, header + theory)
-        print(f"study_theory: теория по {subject_key} отправлена")
+        theory = re.sub(r'\*\*(.+?)\*\*', r'*\1*', theory)
+        theory = theory.replace("```", "`")
+        # Защита от незакрытых тегов — считаем количество * и _
+        if theory.count("*") % 2 != 0:
+            theory = theory + "*"
+        if theory.count("_") % 2 != 0:
+            theory = theory + "_"
+        try:
+            await bot.send_message(chat_id=chat_id, text=theory, parse_mode="Markdown")
+        except Exception:
+            # Если Markdown сломан — отправляем без форматирования
+            clean = re.sub(r'[*_`]', '', theory)
+            await bot.send_message(chat_id=chat_id, text=clean)
+        print(f"study_theory: IT теория отправлена — #{topic_id} {topic}")
     except Exception as e:
-        print(f"study_theory subject error: {e}")
+        print(f"study_theory IT теория error: {e}")
 
 
-async def send_english_theory(bot, chat_id: int):
-    """Урок английского — слово из JSON + правило из JSON + объяснение через DeepSeek."""
+async def send_it_practice(bot, chat_id: int):
+    """13:00 — практика по теме которая была в 11:00."""
     try:
-        import json as _json
-        import random as _random
         from grok import ask_grok
-
-        WORDS_FILE = "data/english_words.json"
-        WORDS_BACKUP = "data/english_words_backup.json"
-        RULES_FILE = "data/english_rules.json"
-        RULES_BACKUP = "data/english_rules_backup.json"
-
-        # ── Берём слово ──────────────────────────────────────────────
-        def _load(path):
-            try:
-                with open(path, encoding="utf-8") as f:
-                    return _json.load(f)
-            except Exception:
-                return []
-
-        def _save(path, data):
-            os.makedirs("data", exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                _json.dump(data, f, ensure_ascii=False, indent=2)
-
-        def _pick_and_remove(work_path, backup_path):
-            items = _load(work_path)
-            if not items:
-                # Список закончился — восстанавливаем из бэкапа и перемешиваем
-                items = _load(backup_path)
-                if not items:
-                    return None
-                _random.shuffle(items)
-                _save(work_path, items)
-                print(f"study_theory: список восстановлен из {backup_path}")
-            item = items.pop(0)
-            _save(work_path, items)
-            return item
-
-        word = _pick_and_remove(WORDS_FILE, WORDS_BACKUP)
-        rule = _pick_and_remove(RULES_FILE, RULES_BACKUP)
-
-        if not word or not rule:
-            print("study_theory: нет слов или правил")
+        topic_data = _get_it_topic_by_offset(1)
+        if not topic_data:
             return
 
-        w = word["word"]
-        transcription = word.get("transcription", "")
-        translation = word.get("translation", "")
-        rule_name = rule["rule"]
-        rule_category = rule.get("category", "")
-        rule_desc = rule.get("description", "")
+        topic = topic_data.get("topic", "")
+        section = topic_data.get("section", "")
 
-        # ── Промпт для DeepSeek ──────────────────────────────────────
-        prompt = f"""Ты преподаватель английского для русскоязычного студента уровня Pre-Intermediate.
+        prompt = f"""Ученик утром изучил тему: "{topic}" (раздел: {section}).
+Напиши практику СТРОГО в таком формате:
 
-Слово: {w} {transcription} — {translation}
-Правило: {rule_name} ({rule_category}) — {rule_desc}
+🛠 *Практика: {topic}*
 
-Составь подробный урок в формате Telegram Markdown. Строго следуй структуре:
+🔁 *Вспомни главное:*
+[одно предложение — суть темы из утреннего урока]
 
-🇬🇧 *АНГЛИЙСКИЙ*
+🔍 *Разбор примера:*
+[конкретный рабочий пример. Если код — каждая строка отдельно в `моноширинном` с комментарием _что делает_. После кода — объяснение результата простыми словами]
 
-━━━━━━━━━━━━━━━━━━━━
-📌 *СЛОВО — {w.upper()}*
-━━━━━━━━━━━━━━━━━━━━
-🔤 Транскрипция: {transcription}
-🇷🇺 Перевод: {translation}
+✏️ *Попробуй сам:*
+[простой вопрос или задача — можно решить в голове, без компьютера]
 
-🧠 *Как запомнить:*
-[НА РУССКОМ — ассоциация или мнемоника — 2-3 предложения]
+_Ответ:_ [правильный ответ с кратким объяснением]
 
-📝 *Примеры:*
-- [English sentence with {w}]
-  [Перевод на русский]
-- [Another English sentence with {w}]
-  [Перевод на русский]
+⚠️ *Частая ошибка:*
+[одна типичная ошибка новичков и как её избежать — одним абзацем]
 
-🔄 Synonyms: [2-3 English synonyms, e.g.: progress, develop, move forward]
-❌ Antonym: [1 English antonym, e.g.: retreat]
+ПРАВИЛА:
+- Между каждой секцией пустая строка
+- *жирный* для заголовков и терминов
+- _курсив_ для комментариев и пояснений
+- Код в `одинарных кавычках`, каждая строка отдельно
+- НЕ используй ** и тройные кавычки
+- НЕ используй линии ━━━
+- Объём: 170-200 слов"""
 
-━━━━━━━━━━━━━━━━━━━━
-📚 *ПРАВИЛО — {rule_name}*
-━━━━━━━━━━━━━━━━━━━━
-🤔 *Что это простыми словами:*
-[НА РУССКОМ — объяснение как для чайника — 3-4 предложения без умных слов]
-
-✅ *Формула:*
-[Покажи формулу кратко, например: Subject + will + be + Verb-ing]
-
-📝 *Примеры:*
-- [Correct English sentence using the rule] ✅
-  [Перевод на русский]
-- [Another correct English sentence] ✅
-  [Перевод на русский]
-
-❌ *Common mistakes (Russian learners):*
-- [Wrong English] → [Correct English]
-- [Wrong English] → [Correct English]
-
-💡 *Запомни:*
-[НА РУССКОМ — лайфхак 1-2 предложения]
-
-━━━━━━━━━━━━━━━━━━━━
-🔗 *СЛОВО + ПРАВИЛО*
-━━━━━━━━━━━━━━━━━━━━
-- [English sentence using {w} + rule {rule_name}]
-  [Перевод на русский]
-- [Another English sentence]
-  [Перевод на русский]
-
-ВАЖНЫЕ ПРАВИЛА:
-- Синонимы, антонимы, ошибки — ТОЛЬКО на английском
-- Объяснения, мнемоники, лайфхаки — ТОЛЬКО на русском
-- Примеры — английское предложение + русский перевод
-- Используй *жирный* для заголовков
-- НЕ используй ** двойные звёздочки
-- НЕ добавляй ничего лишнего кроме структуры
-- Объём: 400-500 слов"""
-
-        theory = await ask_grok(prompt, system="Ты преподаватель английского. Строго следуй структуре. Объясняй как чайнику.", smart=False)
-        if not theory:
+        practice = await ask_grok(
+            prompt,
+            system="Ты наставник по IT. Пиши практические разборы живо и понятно. Telegram Markdown без тройных кавычек.",
+            smart=True
+        )
+        if not practice:
             return
-
-        await _send_long_message(bot, chat_id, theory)
-        print(f"study_theory: английский отправлен — слово={w}, правило={rule_name}")
-
+        practice = re.sub(r'\*\*(.+?)\*\*', r'*\1*', practice)
+        practice = practice.replace("```", "`")
+        await bot.send_message(chat_id=chat_id, text=practice, parse_mode="Markdown")
+        print(f"study_theory: IT практика отправлена — {topic}")
     except Exception as e:
-        print(f"study_theory english error: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"study_theory IT практика error: {e}")
 
 
+async def send_it_review(bot, chat_id: int):
+    """19:00 — повторение темы которая была 2 дня назад."""
+    try:
+        from grok import ask_grok
+        import json as _json
+        # Повторение работает только после 5 изученных тем
+        try:
+            with open(IT_TOPICS_INDEX_FILE) as f:
+                _idx = _json.load(f).get("index", 0)
+        except Exception:
+            _idx = 0
+        if _idx < 5:
+            print(f"study_theory: повторение пропущено — изучено только {_idx} тем, нужно минимум 5")
+            return
+        topic_data = _get_it_topic_by_offset(5)
+        if not topic_data:
+            return
+
+        topic = topic_data.get("topic", "")
+        section = topic_data.get("section", "")
+
+        prompt = f"""Ученик несколько дней назад изучал тему: "{topic}" (раздел: {section}).
+Напиши флэшкард-повторение СТРОГО в таком формате:
+
+🔁 *Повторение: {topic}*
+
+💬 *Помнишь эту тему?*
+[одно предложение — главная суть как напоминалка]
+
+❓ *Три вопроса — ответь сам:*
+1. [вопрос на понимание — "почему" или "как", не "что называется"]
+2. [вопрос на понимание]
+3. [вопрос на понимание]
+
+✅ *Ответы:*
+1. [краткий ответ]
+2. [краткий ответ]
+3. [краткий ответ]
+
+🔗 *Связь с Data Science:*
+[одно предложение — где эта тема пригодится дальше]
+
+ПРАВИЛА:
+- Между каждой секцией пустая строка
+- *жирный* для заголовков
+- _курсив_ для пояснений
+- НЕ используй ** и тройные кавычки
+- НЕ используй линии ━━━
+- Объём: 140-170 слов"""
+
+        review = await ask_grok(
+            prompt,
+            system="Ты наставник по IT. Пиши флэшкарды для повторения живо и коротко. Telegram Markdown без тройных кавычек.",
+            smart=True
+        )
+        if not review:
+            return
+        review = re.sub(r'\*\*(.+?)\*\*', r'*\1*', review)
+        review = review.replace("```", "`")
+        await bot.send_message(chat_id=chat_id, text=review, parse_mode="Markdown")
+        print(f"study_theory: IT повторение отправлено — {topic}")
+    except Exception as e:
+        print(f"study_theory IT повторение error: {e}")
+
+
+
+# ─── Английский: файлы данных ────────────────────────────────────────────────
+CHUNKS_FILE         = "data/english_chunks.json"
+CHUNKS_BACKUP       = "data/english_chunks_backup.json"
+PRONUN_FILE         = "data/english_pronunciation.json"
+PRONUN_BACKUP       = "data/english_pronunciation_backup.json"
+DIALOGS_FILE        = "data/english_dialogs.json"
+DIALOGS_BACKUP      = "data/english_dialogs_backup.json"
+
+
+def _pick_and_remove_item(work_path: str, backup_path: str) -> dict | None:
+    """Берёт первый элемент из work-файла, удаляет его.
+    Если файл пуст — восстанавливает из backup и перемешивает."""
+    import random as _r
+    def _load(p):
+        try:
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    def _save(p, data):
+        os.makedirs("data", exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    items = _load(work_path)
+    if not items:
+        items = _load(backup_path)
+        if not items:
+            return None
+        _r.shuffle(items)
+        _save(work_path, items)
+        print(f"study_theory: список восстановлен из {backup_path}")
+    item = items.pop(0)
+    _save(work_path, items)
+    return item
+
+
+async def send_english_chunk(bot, chat_id: int):
+    """10:00 — chunk дня: готовая разговорная фраза."""
+    try:
+        from grok import ask_grok
+        item = _pick_and_remove_item(CHUNKS_FILE, CHUNKS_BACKUP)
+        if not item:
+            print("study_theory: english_chunks.json пуст")
+            return
+
+        chunk   = item.get("chunk", "")
+        context = item.get("context", "")
+        example = item.get("example", "")
+
+        prompt = f"""Ты учишь разговорному английскому. Ученик хочет говорить как носитель.
+Chunk дня: "{chunk}"
+Контекст использования: {context}
+Пример: {example}
+
+Напиши урок СТРОГО в этом формате (Telegram Markdown, одинарные * и _):
+
+💬 *Chunk дня: "{chunk}"*
+
+🎯 *Когда говорить:*
+[одно-два предложения — конкретная жизненная ситуация когда это говорят]
+
+🗣 *Как произносить:*
+[покажи слитное произношение курсивом, например: _"I-wz-justa-bout-tu"_]
+[одно предложение почему именно так, а не по словам]
+
+📍 *В жизни это звучит так:*
+[два коротких диалога 2-3 реплики каждый. Каждая реплика с новой строки]
+
+✏️ *Теперь ты:*
+Придумай 2 своих примера из своей жизни и произнеси вслух.
+
+💡 *Похожие фразы:*
+• [похожий chunk 1]
+• [похожий chunk 2]
+
+ПРАВИЛА:
+- Между секциями пустая строка
+- *жирный* только заголовки
+- _курсив_ для произношения и примеров
+- НЕ используй ** и тройные кавычки
+- НЕ используй линии ━━━
+- Живо, как старший друг — не как учебник
+- Объём: 180-220 слов"""
+
+        result = await ask_grok(
+            prompt,
+            system="Ты учишь разговорному английскому. Фокус на живой речи носителей. Telegram Markdown без тройных кавычек и линий.",
+            smart=True
+        )
+        if not result:
+            return
+        result = re.sub(r'\*\*(.+?)\*\*', r'*\1*', result)
+        result = result.replace("```", "`")
+        if result.count("*") % 2 != 0:
+            result += "*"
+        if result.count("_") % 2 != 0:
+            result += "_"
+        try:
+            await bot.send_message(chat_id=chat_id, text=result, parse_mode="Markdown")
+        except Exception:
+            clean = re.sub(r'[*_`]', '', result)
+            await bot.send_message(chat_id=chat_id, text=clean)
+        print(f"study_theory: chunk отправлен — {chunk}")
+    except Exception as e:
+        print(f"study_theory english chunk error: {e}")
+
+
+async def send_english_pronunciation(bot, chat_id: int):
+    """15:30 — pronunciation: паттерн речи носителей."""
+    try:
+        from grok import ask_grok
+        item = _pick_and_remove_item(PRONUN_FILE, PRONUN_BACKUP)
+        if not item:
+            print("study_theory: english_pronunciation.json пуст")
+            return
+
+        pattern        = item.get("pattern", "")
+        formal         = item.get("formal", "")
+        casual         = item.get("casual", "")
+        example_formal = item.get("example_formal", "")
+        example_casual = item.get("example_casual", "")
+        note           = item.get("note", "")
+
+        prompt = f"""Ты учишь разговорному произношению английского.
+Паттерн: {pattern}
+Формально: {formal} → Разговорно: {casual}
+Пример формально: {example_formal}
+Пример разговорно: {example_casual}
+Заметка: {note}
+
+Напиши урок СТРОГО в этом формате (Telegram Markdown):
+
+🎙 *Звук дня: {pattern}*
+
+🔊 *Как говорят носители:*
+[объясни разницу между формальным и разговорным — 2-3 предложения]
+_Формально:_ {example_formal}
+_Разговорно:_ {example_casual}
+
+🎯 *Ещё примеры:*
+[3 коротких примера с разговорным произношением, каждый с новой строки]
+
+⚠️ *Когда НЕ использовать:*
+[одно предложение — формальные ситуации где это неуместно]
+
+🔁 *Повтори вслух 5 раз:*
+[дай короткую фразу для тренировки этого паттерна]
+
+ПРАВИЛА:
+- Между секциями пустая строка
+- *жирный* только заголовки
+- _курсив_ для примеров произношения
+- НЕ используй ** и тройные кавычки
+- НЕ используй линии ━━━
+- Объём: 150-180 слов"""
+
+        result = await ask_grok(
+            prompt,
+            system="Ты учишь произношению английского как у носителей. Telegram Markdown без тройных кавычек и линий.",
+            smart=False
+        )
+        if not result:
+            return
+        result = re.sub(r'\*\*(.+?)\*\*', r'*\1*', result)
+        result = result.replace("```", "`")
+        if result.count("*") % 2 != 0:
+            result += "*"
+        if result.count("_") % 2 != 0:
+            result += "_"
+        try:
+            await bot.send_message(chat_id=chat_id, text=result, parse_mode="Markdown")
+        except Exception:
+            clean = re.sub(r'[*_`]', '', result)
+            await bot.send_message(chat_id=chat_id, text=clean)
+        print(f"study_theory: pronunciation отправлен — {pattern}")
+    except Exception as e:
+        print(f"study_theory english pronunciation error: {e}")
+
+
+async def send_english_dialog(bot, chat_id: int):
+    """22:00 — диалог дня: живая ситуация на английском."""
+    try:
+        from grok import ask_grok
+        item = _pick_and_remove_item(DIALOGS_FILE, DIALOGS_BACKUP)
+        if not item:
+            print("study_theory: english_dialogs.json пуст")
+            return
+
+        situation = item.get("situation", "")
+        dialog    = item.get("dialog", [{}])[0]
+        vocab     = item.get("vocab", [])
+
+        lines = []
+        for k, v in dialog.items():
+            speaker = "A:" if k.startswith("A") else "B:"
+            lines.append(f"{speaker} _{v}_")
+        dialog_text = "\n".join(lines)
+
+        vocab_lines = "\n".join([f"• *{v['word']}* — {v['meaning']}" for v in vocab])
+
+        prompt = f"""Ты учишь разговорному английскому через живые диалоги.
+Ситуация: {situation}
+Диалог:
+{dialog_text}
+Словарь:
+{vocab_lines}
+
+Напиши урок СТРОГО в этом формате (Telegram Markdown):
+
+🎬 *Ситуация: {situation}*
+
+[диалог — каждая реплика с новой строки, имя говорящего жирным *A:* или *B:*, текст курсивом]
+
+📖 *Разбор:*
+{vocab_lines}
+
+🗣 *Прочитай вслух 2 раза.*
+Представь что это ты. Почувствуй ритм речи.
+
+💭 *Ключевая мысль:*
+[одно предложение — что главное в этом диалоге с точки зрения живого английского]
+
+ПРАВИЛА:
+- Между секциями пустая строка
+- *жирный* для имён говорящих и терминов
+- _курсив_ для реплик диалога
+- НЕ используй ** и тройные кавычки
+- НЕ используй линии ━━━
+- Объём: 120-150 слов"""
+
+        result = await ask_grok(
+            prompt,
+            system="Ты учишь разговорному английскому через диалоги. Telegram Markdown без тройных кавычек и линий.",
+            smart=False
+        )
+        if not result:
+            return
+        result = re.sub(r'\*\*(.+?)\*\*', r'*\1*', result)
+        result = result.replace("```", "`")
+        if result.count("*") % 2 != 0:
+            result += "*"
+        if result.count("_") % 2 != 0:
+            result += "_"
+        try:
+            await bot.send_message(chat_id=chat_id, text=result, parse_mode="Markdown")
+        except Exception:
+            clean = re.sub(r'[*_`]', '', result)
+            await bot.send_message(chat_id=chat_id, text=clean)
+        print(f"study_theory: диалог отправлен — {situation}")
+    except Exception as e:
+        print(f"study_theory english dialog error: {e}")
