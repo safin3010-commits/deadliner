@@ -833,13 +833,25 @@ async def check_user_reminders(bot, chat_id: int):
             ])
 
             try:
-                await bot.send_message(
+                # Удаляем предыдущее сообщение этого напоминания
+                prev_msg_id = r.get("last_message_id")
+                if prev_msg_id:
+                    try:
+                        await bot.delete_message(chat_id=chat_id, message_id=prev_msg_id)
+                    except Exception:
+                        pass
+
+                sent = await bot.send_message(
                     chat_id=chat_id,
                     text=msg_text,
                     parse_mode="Markdown",
                     reply_markup=keyboard
                 )
                 _jarvis_write(f"Напоминание: {r['task_title']}")
+
+                # Сохраняем message_id для удаления при следующем напоминании
+                from reminders import save_last_message_id
+                save_last_message_id(r["id"], sent.message_id)
             except Exception as e:
                 print(f"Reminder send error: {e}")
 
@@ -1933,6 +1945,11 @@ async def _check_vk_and_notify_inner(bot, chat_id: int):
                 if not formatted:
                     formatted = vk_text
 
+                # Убираем мусорные ссылки из конца (vk.com/club, дубли away.php)
+                import re as _re_vk
+                formatted = _re_vk.sub(r'https?://vk\.com/club\d+[^\s]*', '', formatted)
+                formatted = _re_vk.sub(r'https?://vk\.com/away\.php[^\s]*', '', formatted)
+                formatted = _re_vk.sub(r'\s{3,}', '\n\n', formatted).strip()
                 header = "<b>💬 ВКонтакте</b>\n\n<b>💬 Новое сообщение</b>\n" + "─" * 20
                 full_text = f"{header}\n\n{formatted}"
                 if len(full_text) > 4000:

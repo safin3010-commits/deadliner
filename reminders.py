@@ -109,3 +109,13 @@ def format_interval(minutes: int, times: int = 0) -> str:
     elif minutes % 60 == 0:
         return f"каждые {minutes // 60} ч"
     return f"каждые {minutes} мин"
+
+
+def save_last_message_id(reminder_id: str, message_id: int):
+    """Сохраняем message_id последнего отправленного напоминания."""
+    reminders = _load()
+    for r in reminders:
+        if str(r["id"]) == str(reminder_id):
+            r["last_message_id"] = message_id
+            break
+    _save(reminders)

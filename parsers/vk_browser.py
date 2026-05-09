@@ -117,13 +117,14 @@ async def _format_with_ai(text: str) -> str:
             "- Верни текст готовым для отправки в Telegram\n\n"
             "Никаких пояснений — только отформатированный текст."
         )
+        text = _decode_vk_links(text)
         result = await ask_grok(text, system=system)
         if result:
             return result
     except Exception as e:
         print(f"VK format AI error: {e}")
-    # Фоллбэк — возвращаем оригинал без изменений
-    return text.strip()
+    # Фоллбэк — хотя бы декодируем ссылки
+    return _decode_vk_links(text).strip()
 
 
 async def fetch_todays_vk_messages() -> list:

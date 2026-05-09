@@ -87,7 +87,7 @@ def mark_task_done(task_id) -> bool:
     return False
 
 def get_pending_tasks() -> list:
-    return [t for t in get_tasks() if not t.get("done")]
+    return [t for t in get_tasks() if not t.get("done") and t.get("source") != "reminder_only"]
 
 def get_seen_messages() -> list:
     return read_json(SEEN_MESSAGES_FILE) or []

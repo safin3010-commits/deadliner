@@ -753,12 +753,17 @@ def _clean_reminder_text(text: str) -> str:
         r'напомни(л|ть)?\s+мне\s*',
         r'(напомни|напоминай|remind)\s*',
         r'через\s+\d+\s+(?:минуту|минуты|минут|мин|час|часа|часов)\s*',
+        r'начиная\s+с\s+\d+\s+(?:утра|дня|вечера|ночи|часов|:00)\s*',
+        r'начиная\s+с\s+\d{1,2}:\d{2}\s*',
+        r'начиная\s+с\s*',
         r'каждые?\s+\d+\s+(?:минуту|минуты|минут|мин|час|часа|часов)\s*',
         r'каждый\s+час\s*',
         r'каждую\s+минуту\s*',
         r'\d+\s*раз[а]?\s*',
         r'в\s+\d{1,2}:\d{2}\s*',
-        r'\b(нужно|надо|хочу|про|что|это|мне|ты|я)\b\s*',
+        r'\b(нужно|надо|хочу|сделай|сделать|добав(ь)?|добавь|поставь|установи|создай|напоминание)\b\s*',
+        r'\b(про|что|это|мне|ты|я|на завтра|на сегодня|на послезавтра)\b\s*',
+        r'задач[ую]\s*',
     ]
     for p in patterns:
         t = _re.sub(p, ' ', t, flags=_re.IGNORECASE)
@@ -798,383 +803,177 @@ def _has_deadline_words(tl: str) -> bool:
 
 
 async def _try_parse_task_from_text(update, context, text: str):
-    """Умный парсинг задач и напоминаний из свободного текста."""
+    """
+    Парсинг: ИИ извлекает суть и дату, всегда спрашиваем — задача или напоминание.
+    """
     try:
         from grok import ask_grok
         import json as _json
+        import re as _re
+        import time as _time
 
         now = datetime.datetime.now(tz=UFA_TZ)
         now_str = now.strftime('%d.%m.%Y')
         now_time_str = now.strftime('%H:%M')
         weekday = ["понедельник","вторник","среда","четверг","пятница","суббота","воскресенье"][now.weekday()]
-
         day1 = (now + datetime.timedelta(days=1)).strftime('%d.%m.%Y')
-        day2 = (now + datetime.timedelta(days=2)).strftime('%d.%m.%Y')
-        day7 = (now + datetime.timedelta(days=7)).strftime('%d.%m.%Y')
-
-        # ── ЛОКАЛЬНЫЙ ПЕРЕХВАТ: если явно напоминание с временем — не идём в ИИ ──
-        if _is_clearly_reminder(text):
-            rem_dt, clean = await _parse_reminder_time_local(text, now)
-            if rem_dt:
-                rem_text = _clean_reminder_text(clean)
-                if not rem_text:
-                    rem_text = _clean_reminder_text(text)
-                task = add_task(rem_text, rem_dt.isoformat(), "reminder_only")
-                from reminders import add_reminder
-                delay_mins = max(1, int((rem_dt - now).total_seconds() / 60))
-                add_reminder(str(task["id"]), rem_text, delay_mins, 1, start_at=rem_dt.isoformat())
-                time_fmt = rem_dt.strftime("%H:%M") if rem_dt.date() == now.date() else rem_dt.strftime("%d.%m %H:%M")
-                await update.message.reply_text(
-                    f"🔔 *Напомню в {time_fmt}*\n\n_{rem_text}_",
-                    parse_mode="Markdown"
-                )
-                return
 
         prompt = (
-            f"Текст пользователя: \"{text}\"\n"
-            f"Сейчас: {now_str} {now_time_str} ({weekday}). Завтра: {day1}\n\n"
-            f"ОПРЕДЕЛИ ТИП запроса:\n"
-            f"НАПОМИНАНИЕ (is_task=false, is_reminder=true): есть 'напомни'/'через X минут'/'через X часов' + действие\n"
-            f"ЗАДАЧА (is_task=true, is_reminder=false): что-то нужно сделать и отметить, есть дедлайн\n"
-            f"ЗАДАЧА+НАПОМИНАНИЕ: есть дедлайн И слово 'напомни'\n"
-            f"НЕОДНОЗНАЧНО (ambiguous=true): непонятно задача или напоминание\n\n"
-            f"Время суток: утро=09:00, день=13:00, вечер=19:00, ночь/перед сном=21:00\n\n"
-            f"ВАЖНО для напоминаний с относительным временем (через X минут/часов):\n"
-            f"НЕ вычисляй reminder_time сам — верни offset_minutes (число минут от сейчас).\n"
-            f"Для абсолютного времени (в 18:00, завтра в 9:00) — верни reminder_time в формате DD.MM.YYYY HH:MM.\n\n"
-            f"Верни JSON:\n"
-            f"{{\"is_task\": bool, \"is_reminder\": bool, \"ambiguous\": bool,\n"
-            f"  \"tasks\": [{{\"title\": \"..\", \"deadline\": \"DD.MM.YYYY или null\",\n"
-            f"    \"has_reminder\": false, \"reminder_interval\": null, \"reminder_times\": null, \"reminder_start\": null}}],\n"
-            f"  \"offset_minutes\": null,\n"
-            f"  \"reminder_time\": \"DD.MM.YYYY HH:MM или null\",\n"
-            f"  \"reminder_text\": \"текст напоминания или null\",\n"
-            f"  \"reminder_interval\": null,\n"
-            f"  \"reminder_times\": null}}\n\n"
-            f"ВАЖНО: для повторяющихся (каждые X, N раз, в течение) заполни reminder_interval (минуты) и reminder_times.\n"
-            f"Пример: каждые 15 минут в течение 10 часов → reminder_interval=15, reminder_times=40, offset_minutes=15\n"
-            f"Примеры:\n"
-            f"'напомни через 28 минут спать лечь' → is_reminder=true, offset_minutes=28, reminder_text='Лечь спать'\n"
-            f"'через 40 минут зарядку' → is_reminder=true, offset_minutes=40, reminder_text='Сделать зарядку'\n"
-            f"'через 2 часа позвонить' → is_reminder=true, offset_minutes=120, reminder_text='Позвонить'\n"
-            f"'напомни в 18:00 позвонить' → is_reminder=true, reminder_time={now_str} 18:00, offset_minutes=null\n"
-            f"'напоминай каждые 30 минут 10 раз' → is_reminder=true, offset_minutes=30, reminder_text='...', reminder_interval=30, reminder_times=10\n"
-            f"'через час и потом каждые 15 минут 5 раз упражнения' → is_reminder=true, offset_minutes=60, reminder_interval=15, reminder_times=5, reminder_text='Сделать упражнения'\n"
-            f"'мне нужно сдать лабу в пятницу, напоминай в день сдачи 10 раз' → is_task=true, tasks=[{{title:'Сдать лабу', deadline:'пятница', has_reminder:true, reminder_interval:60, reminder_times:10, reminder_start:'пятница 09:00'}}]\n"
-            f"'сдать лабу до пятницы' → is_task=true, is_reminder=false\n"
-            f"'каждый день на неделю конспекты' → is_task=true, 7 задач с датами {day1}...{day7}\n\n"
-            f"Название задачи — суть без слов 'добавь'/'напомни'/'сделать'/'нужно'/'надо'.\n"
-            f"Только JSON, без пояснений."
+            "Текст: \"" + text + "\"\n"
+            "Сейчас: " + now_str + " " + now_time_str + " (" + weekday + "). Завтра: " + day1 + "\n\n"
+            "Извлеки все действия и даты. Верни JSON:\n"
+            "{\"items\": [{\"action\": \"суть действия без дат и служебных слов\", \"deadline\": \"DD.MM.YYYY или null\"}]}\n\n"
+            "ПРАВИЛА:\n"
+            "- action: ТОЛЬКО действие. Забрать диск, Выпить воду, Позвонить маме\n"
+            "- НЕ включай в action: даты, время, напомни, сдать, добавь\n"
+            "- deadline: только явно указанная дата/день/относительная дата в формате DD.MM.YYYY\n"
+            "- ВАЖНО: все даты должны быть в БУДУЩЕМ. Пятница = ближайшая будущая пятница\n"
+            "- если несколько действий — несколько элементов в items\n\n"
+            "ПРИМЕРЫ (сейчас 09.05.2026):\n"
+            "забрать диск завтра → items=[{action:Забрать диск, deadline:" + day1 + "}]\n"
+            "позвонить маме → items=[{action:Позвонить маме, deadline:null}]\n"
+            "сдать лабу до пятницы → items=[{action:Сдать лабу, deadline:15.05.2026}]\n"
+            "сдать до воскресенья → items=[{action:Сдать, deadline:10.05.2026}]\n"
+            "Только JSON без пояснений."
         )
 
-        # ── Локальный парсер ПОВТОРЯЮЩИХСЯ напоминаний (без ИИ) ──────
-        import re as _re2
-        _tl = text.lower().strip()
+        result = await ask_grok(prompt, system="Ты анализатор текста. Отвечай только валидным JSON.")
+        if not result:
+            await update.message.reply_text("❌ Не удалось распознать запрос")
+            return
 
-        # Сложные конструкции — отдаём ИИ целиком
-        _complex_patterns = [
-            r'в течение\s+\d+',      # "в течение 10 часов"
-            r'весь день',               # "весь день"
-            r'до (вечера|ночи|утра|конца дня)',  # "до вечера"
-            r'\d+\s*час[оа]?\s+(каждые?|напомин)',  # "10 часов каждые"
-            r'(каждые?|каждый).+и потом',  # составные
-        ]
-        _is_complex = any(_re2.search(p, _tl) for p in _complex_patterns)
+        result = _re.sub(r'```[a-z]*\n?', '', result).strip()
+        match = _re.search(r'\{.*\}', result, _re.DOTALL)
+        if not match:
+            await update.message.reply_text("❌ Не удалось распознать запрос")
+            return
+        try:
+            data = _json.loads(match.group())
+        except _json.JSONDecodeError as je:
+            print(f"JSON parse error: {je}")
+            await update.message.reply_text("❌ Не смог разобрать ответ ИИ. Попробуй переформулировать.")
+            return
 
-        _repeat_m = None if _is_complex else _re2.search(
-            r'(каждые?|каждую|каждый)\s+(\d+)\s+(минуту|минуты|минут|мин|час|часа|часов)',
-            _tl
-        )
-        # "каждый час" без числа — interval=60
-        if not _repeat_m:
-            _repeat_m2 = _re2.search(r'(каждый\s+час|каждую\s+минуту)', _tl)
-            if _repeat_m2:
-                _interval_local = 60 if 'час' in _repeat_m2.group() else 1
-                _times_m = _re2.search(r'(\d+)\s*раз[а]?', _tl)
-                _times_local = int(_times_m.group(1)) if _times_m else 5
-                _rem_clean = _clean_reminder_text(text)
-                if not _rem_clean or len(_rem_clean) < 2:
-                    _rem_clean = text
-                _first_fire = now + datetime.timedelta(minutes=_interval_local)
-                task = add_task(_rem_clean, _first_fire.isoformat(), "reminder_only")
-                from reminders import add_reminder
-                add_reminder(str(task["id"]), _rem_clean, _interval_local, _times_local, start_at=_first_fire.isoformat())
-                _tfmt_r = _first_fire.strftime("%H:%M")
-                _ivl_str_r = "каждый час" if _interval_local == 60 else f"каждую минуту"
+        items = data.get("items", [])
+        if not items and data.get("action"):
+            items = [{"action": data.get("action"), "deadline": data.get("deadline")}]
+        if not items:
+            await update.message.reply_text("❌ Не удалось распознать запрос. Попробуй переформулировать.")
+            return
+
+        async def _parse_deadline(deadline_str):
+            if not deadline_str or deadline_str in ("null", "None", ""):
+                return None
+            now_local = datetime.datetime.now(tz=UFA_TZ)
+            for fmt in ["%d.%m.%Y", "%d.%m.%Y %H:%M"]:
+                try:
+                    dt = datetime.datetime.strptime(deadline_str, fmt).replace(tzinfo=UFA_TZ)
+                    # Если дата в прошлом — сдвигаем на неделю вперёд
+                    if dt.date() < now_local.date():
+                        dt += datetime.timedelta(weeks=1)
+                    return dt
+                except Exception:
+                    continue
+            dt = await _parse_dt_smart(deadline_str)
+            if dt and dt.date() < now_local.date():
+                dt += datetime.timedelta(weeks=1)
+            return dt
+
+        if len(items) > 1:
+            # Проверяем: одно действие с разными датами = date_ambiguous
+            actions = [i.get("action", "").strip().lower() for i in items if i.get("action")]
+            all_same_action = len(set(actions)) == 1
+
+            if all_same_action:
+                # Одно действие, несколько дат — показываем выбор даты
+                action = items[0].get("action", "").strip()
+                if action:
+                    action = action[0].upper() + action[1:]
+                date_options = []
+                for item in items:
+                    dl_str = item.get("deadline")
+                    if dl_str and dl_str not in ("null", "None", ""):
+                        dl_dt = await _parse_deadline(dl_str)
+                        if dl_dt:
+                            date_options.append(dl_dt.strftime("%d.%m.%Y"))
+                _ambig_key = f"ambig_{int(_time.time()*1000) & 0xFFFFFF}_{hash(text) & 0xFFFF}"
+                context.user_data[_ambig_key] = {
+                    "text": text,
+                    "action": action,
+                    "deadline_iso": None,
+                }
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup as _IKM2
+                kb = _IKM2([[
+                    InlineKeyboardButton("📋 Задача", callback_data=f"type_task:{_ambig_key}"),
+                    InlineKeyboardButton("🔔 Напоминание", callback_data=f"type_remind:{_ambig_key}"),
+                ]])
+                dates_str = " или ".join(date_options) if date_options else ""
+                preview = f"_{action}_"
+                if dates_str:
+                    preview += f"\n📅 {dates_str}"
                 await update.message.reply_text(
-                    f"🔔 *Первое в {_tfmt_r}*\n{_ivl_str_r}, {_times_local} раз\n\n_{_rem_clean}_",
+                    "🤔 *Что создать?*\n\n" + preview,
+                    reply_markup=kb,
                     parse_mode="Markdown"
                 )
+                # Сохраняем date_options в wizard draft на случай напоминания
+                context.user_data[_ambig_key]["date_options"] = date_options
                 return
-        if _repeat_m:
-            _runit = _repeat_m.group(3)
-            _rval = int(_repeat_m.group(2))
-            _interval_local = _rval * 60 if _runit in ("час","часа","часов") else _rval
-            _times_m = _re2.search(r'(\d+)\s*раз[а]?', _tl)
-            _times_local = int(_times_m.group(1)) if _times_m else 5
-            _rem_clean = _clean_reminder_text(text)
-            if not _rem_clean or len(_rem_clean) < 2:
-                _rem_clean = text
-            # Ищем start_at: «через X часов/минут» отдельно от интервала
-            _start_m = _re2.search(r'через\s+(\d+)\s+(час|часа|часов|минуту|минуты|минут|мин)', _tl)
-            if _start_m:
-                _sv = int(_start_m.group(1))
-                _su = _start_m.group(2)
-                _start_delta = _sv * 60 if _su in ('час','часа','часов') else _sv
-                _first_fire = now + datetime.timedelta(minutes=_start_delta)
             else:
-                _first_fire = now + datetime.timedelta(minutes=_interval_local)
-            task = add_task(_rem_clean, _first_fire.isoformat(), "reminder_only")
-            from reminders import add_reminder
-            add_reminder(str(task["id"]), _rem_clean, _interval_local, _times_local, start_at=_first_fire.isoformat())
-            _tfmt_r = _first_fire.strftime("%H:%M")
-            _ivl_str_r = f"каждые {_interval_local} мин" if _interval_local < 60 else ("каждый час" if _interval_local == 60 else f"каждые {_interval_local//60} ч")
-            await update.message.reply_text(
-                f"🔔 *Первое в {_tfmt_r}*\n{_ivl_str_r}, {_times_local} раз\n\n_{_rem_clean}_",
-                parse_mode="Markdown"
-            )
-            return
-
-        # ── Локальный парсер ОДНОКРАТНЫХ напоминаний (без ИИ) ──────────
-        _local_reminder_dt = None
-        _local_reminder_text = None
-
-        # Если есть признак повтора — не перехватываем, идём в ИИ
-        _has_repeat = bool(_re2.search(r'каждые?|каждую|каждый|\d+\s*раз[а]?|раз в|повтор|снова|опять', _tl))
-
-        if not _has_repeat:
-            # "через X минут/часов [текст]" — в любом месте строки
-            _m = _re2.search(r'через\s+(\d+)\s+(минуту|минуты|минут|мин)', _tl)
-            if _m:
-                _local_reminder_dt = now + datetime.timedelta(minutes=int(_m.group(1)))
-                _local_reminder_text = _re2.sub(r'через\s+\d+\s+(?:минуту|минуты|минут|мин)', '', text, flags=_re2.IGNORECASE).strip()
-            if not _local_reminder_dt:
-                _m = _re2.search(r'через\s+(\d+)\s+(час|часа|часов)', _tl)
-                if _m:
-                    _local_reminder_dt = now + datetime.timedelta(hours=int(_m.group(1)))
-                    _local_reminder_text = _re2.sub(r'через\s+\d+\s+(?:час|часа|часов)', '', text, flags=_re2.IGNORECASE).strip()
-
-        if _local_reminder_dt and _local_reminder_text is not None:
-            # Чистим текст от служебных слов
-            _rem_text = _clean_reminder_text(_local_reminder_text)
-            if not _rem_text or len(_rem_text) < 2:
-                _rem_text = _clean_reminder_text(text)
-            _rem_text = _rem_text[0].upper() + _rem_text[1:] if _rem_text else text
-            task = add_task(_rem_text, _local_reminder_dt.isoformat(), "reminder_only")
-            from reminders import add_reminder
-            _delay = max(1, int((_local_reminder_dt - now).total_seconds() / 60))
-            add_reminder(str(task["id"]), _rem_text, _delay, 1, start_at=_local_reminder_dt.isoformat())
-            _tfmt = _local_reminder_dt.strftime("%H:%M") if _local_reminder_dt.date() == now.date() else _local_reminder_dt.strftime("%d.%m %H:%M")
-            await update.message.reply_text(
-                f"🔔 *Напомню в {_tfmt}*\n\n_{_rem_text}_",
-                parse_mode="Markdown"
-            )
-            return
-
-        result = await ask_grok(prompt, system="Ты анализатор задач и напоминаний. ПРАВИЛО: 'напомни через X' или 'через X минут' — ВСЕГДА is_reminder=true, is_task=false. Отвечай только валидным JSON.")
-        if not result:
-            return
-
-        # Чистим ответ от <think> блоков R1 и markdown
-        result = re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
-        result = re.sub(r'```[a-z]*\n?', '', result).strip()
-        result = result.strip('`').strip()
-
-        # Берём только JSON часть
-        json_match = re.search(r'\{.*\}', result, re.DOTALL)
-        if not json_match:
-            return
-        data = _json.loads(json_match.group())
-
-        # Неоднозначный запрос — спрашиваем уточнение
-        if data.get("ambiguous"):
-            rem_text = data.get("reminder_text") or data.get("tasks", [{}])[0].get("title", text)
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup as _IKM2
-            kb = _IKM2([[
-                InlineKeyboardButton("📋 В список задач", callback_data=f"ambig_task:{text[:50]}"),
-                InlineKeyboardButton("🔔 Просто напомнить", callback_data=f"ambig_remind:{text[:50]}"),
-            ]])
-            await update.message.reply_text(
-                f"🤔 *Уточни:*\n\n_{rem_text}_\n\nЭто задача в список или просто напоминание?",
-                reply_markup=kb,
-                parse_mode="Markdown"
-            )
-            return
-
-        # Чистое напоминание (без задачи)
-        if data.get("is_reminder") and not data.get("is_task"):
-            rem_time_str = data.get("reminder_time")
-            rem_text = data.get("reminder_text") or text
-            # Повторяющееся напоминание — interval и times из ответа ИИ
-            _ri = data.get("reminder_interval") or data.get("interval_minutes")
-            _rt = data.get("reminder_times") or data.get("times")
-            if _ri and _rt:
-                try:
-                    _interval = int(_ri)
-                    _times = int(_rt)
-                    _om = data.get("offset_minutes")
-                    if _om:
-                        _first_dt = now + datetime.timedelta(minutes=int(_om))
-                    elif rem_time_str and rem_time_str not in ("null", "None", ""):
-                        _first_dt = datetime.datetime.strptime(rem_time_str, "%d.%m.%Y %H:%M").replace(tzinfo=UFA_TZ)
-                    else:
-                        _first_dt = now + datetime.timedelta(minutes=_interval)
-                    _rem_text_r = rem_text if rem_text and rem_text not in ("null","None") else text
-                    if _rem_text_r and _rem_text_r[0].islower():
-                        _rem_text_r = _rem_text_r[0].upper() + _rem_text_r[1:]
-                    task = add_task(_rem_text_r, _first_dt.isoformat(), "reminder_only")
-                    from reminders import add_reminder
-                    add_reminder(str(task["id"]), _rem_text_r, _interval, _times, start_at=_first_dt.isoformat())
-                    _tfmt = _first_dt.strftime("%H:%M") if _first_dt.date() == now.date() else _first_dt.strftime("%d.%m %H:%M")
-                    if _interval < 60:
-                        _ivl_str = f"каждые {_interval} мин"
-                    elif _interval == 60:
-                        _ivl_str = "каждый час"
-                    else:
-                        _ivl_str = f"каждые {_interval//60} ч"
+                # Разные действия — создаём все как задачи
+                added = []
+                for item in items:
+                    action = (item.get("action") or "").strip()
+                    if not action or action in ("null", "None"):
+                        continue
+                    action = action[0].upper() + action[1:]
+                    deadline_dt = await _parse_deadline(item.get("deadline"))
+                    task = add_task(action, deadline_dt.isoformat() if deadline_dt else None, "manual")
+                    dl = f" — {deadline_dt.strftime('%d.%m.%Y')}" if deadline_dt else ""
+                    added.append(f"📌 {task['title']}{dl}")
+                if added:
                     await update.message.reply_text(
-                        f"🔔 *Напомню в {_tfmt}*\n{_ivl_str}, {_times} раз\n\n_{_rem_text_r}_",
+                        "✅ *Задачи добавлены:*\n\n" + "\n".join(added),
                         parse_mode="Markdown"
                     )
-                    return
-                except Exception as _re:
-                    print(f"Repeat reminder error: {_re}")
-            # Проверяем offset_minutes как запасной вариант
-            _om = data.get("offset_minutes")
-            if _om and (not rem_time_str or rem_time_str in ("null", "None", "")):
-                try:
-                    rem_dt = now + datetime.timedelta(minutes=int(_om))
-                    rem_text2 = rem_text if rem_text and rem_text not in ("null", "None") else text
-                    rem_text2 = _clean_reminder_text(rem_text2)
-                    task = add_task(rem_text2, rem_dt.isoformat(), "reminder_only")
-                    from reminders import add_reminder as _ar2
-                    _ar2(str(task["id"]), rem_text2, int(_om), 1, start_at=rem_dt.isoformat())
-                    time_fmt2 = rem_dt.strftime("%H:%M") if rem_dt.date() == now.date() else rem_dt.strftime("%d.%m %H:%M")
-                    await update.message.reply_text(f"🔔 *Напомню в {time_fmt2}*\n\n_{rem_text2}_", parse_mode="Markdown")
-                    return
-                except Exception:
-                    pass
-            if not rem_time_str or rem_time_str in ("null", "None", ""):
-                # Последний шанс — локальный парсер
-                _rem_dt2, _clean2 = await _parse_reminder_time_local(text, now)
-                if _rem_dt2:
-                    _rem_text2 = _clean_reminder_text(_clean2) or _clean_reminder_text(text)
-                    task = add_task(_rem_text2, _rem_dt2.isoformat(), "reminder_only")
-                    from reminders import add_reminder as _ar3
-                    _delay2 = max(1, int((_rem_dt2 - now).total_seconds() / 60))
-                    _ar3(str(task["id"]), _rem_text2, _delay2, 1, start_at=_rem_dt2.isoformat())
-                    _tfmt2 = _rem_dt2.strftime("%H:%M") if _rem_dt2.date() == now.date() else _rem_dt2.strftime("%d.%m %H:%M")
-                    await update.message.reply_text(f"🔔 *Напомню в {_tfmt2}*\n\n_{_rem_text2}_", parse_mode="Markdown")
-                    return
-                await update.message.reply_text("❌ Не понял когда напомнить. Попробуй: 'напомни через 11 минут написать другу'")
-                return
-            try:
-                # Парсим время напоминания
-                rem_dt = None
-                # Сначала пробуем стандартные форматы
-                for fmt in ["%d.%m.%Y %H:%M", "%d.%m.%Y"]:
-                    try:
-                        _parsed = datetime.datetime.strptime(rem_time_str, fmt).replace(tzinfo=UFA_TZ)
-                        # Валидация: минуты 0-59, часы 0-23
-                        if 0 <= _parsed.hour <= 23 and 0 <= _parsed.minute <= 59:
-                            rem_dt = _parsed
-                            break
-                    except ValueError:
-                        continue
-                # Если ИИ вернул невалидное время (10:63) — парсим offset_minutes если есть
-                if not rem_dt:
-                    _om = data.get("offset_minutes")
-                    if _om:
-                        try:
-                            rem_dt = now + datetime.timedelta(minutes=int(_om))
-                        except Exception:
-                            pass
-                if not rem_dt:
-                    rem_dt = await _parse_dt_smart(rem_time_str)
-                if not rem_dt:
-                    await update.message.reply_text(f"❌ Не удалось распознать время: {rem_time_str}")
-                    return
-
-                # Создаём задачу-напоминание с особым source
-                task = add_task(rem_text, rem_dt.isoformat(), "reminder_only")
-                from reminders import add_reminder
-                delay_mins = max(1, int((rem_dt - now).total_seconds() / 60))
-                add_reminder(str(task["id"]), rem_text, delay_mins, 1, start_at=rem_dt.isoformat())
-
-                time_fmt = rem_dt.strftime("%H:%M") if rem_dt.date() == now.date() else rem_dt.strftime("%d.%m %H:%M")
-                await update.message.reply_text(
-                    f"🔔 *Напомню в {time_fmt}*\n\n_{rem_text}_",
-                    parse_mode="Markdown"
-                )
-                return
-            except Exception as e:
-                print(f"Reminder parse error: {e}")
-                await update.message.reply_text("❌ Не удалось установить напоминание")
                 return
 
-        if not data.get("is_task"):
-            return
+        item = items[0]
+        action = (item.get("action") or "").strip()
+        if not action or action in ("null", "None"):
+            action = _clean_reminder_text(text) or text[:50]
+        if action:
+            action = action[0].upper() + action[1:]
 
-        tasks_data = data.get("tasks", [])
-        if not tasks_data:
-            return
+        deadline_dt = await _parse_deadline(item.get("deadline"))
 
-        added = []
-        for td in tasks_data:
-            title = td.get("title", "").strip()
-            if not title:
-                continue
+        preview_lines = ["_" + action + "_"]
+        if deadline_dt:
+            preview_lines.append("📅 " + deadline_dt.strftime('%d.%m.%Y'))
 
-            deadline_str = td.get("deadline")
-            dt = None
-            if deadline_str and deadline_str not in ("null", "None", ""):
-                dt = await _parse_dt_smart(deadline_str)
+        _ambig_key = f"ambig_{int(_time.time()*1000) & 0xFFFFFF}_{hash(text) & 0xFFFF}"
+        context.user_data[_ambig_key] = {
+            "text": text,
+            "action": action,
+            "deadline_iso": deadline_dt.isoformat() if deadline_dt else None,
+        }
 
-            task = add_task(title, dt.isoformat() if dt else None, "manual")
-
-            line = f"📌 {task['title']}"
-            if dt:
-                line += f" — {dt.strftime('%d.%m.%Y')}"
-
-            # Напоминание к задаче
-            if td.get("has_reminder") and td.get("reminder_interval"):
-                interval = int(td["reminder_interval"])
-                times = int(td.get("reminder_times") or 5)
-                reminder_start = td.get("reminder_start")
-                start_at = None
-                if reminder_start and reminder_start not in ("null", "None", ""):
-                    try:
-                        start_dt = await _parse_dt_smart(reminder_start)
-                        if start_dt:
-                            start_at = start_dt.isoformat()
-                    except Exception:
-                        pass
-                from reminders import add_reminder, format_interval
-                add_reminder(str(task["id"]), title, interval, times, start_at=start_at)
-                line += f"\n  🔔 {format_interval(interval)}, {times} раз"
-                if start_at:
-                    start_fmt = datetime.datetime.fromisoformat(start_at).strftime('%d.%m')
-                    line += f" (с {start_fmt})"
-
-            added.append(line)
-
-        if not added:
-            return
-
-        if len(added) == 1:
-            confirm = f"✅ *Задача добавлена!*\n\n{added[0]}"
-        else:
-            confirm = f"✅ *Добавлено задач: {len(added)}*\n\n" + "\n".join(added)
-
-        await update.message.reply_text(confirm, parse_mode="Markdown")
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup as _IKM2
+        kb = _IKM2([[
+            InlineKeyboardButton("📋 Задача", callback_data=f"type_task:{_ambig_key}"),
+            InlineKeyboardButton("🔔 Напоминание", callback_data=f"type_remind:{_ambig_key}"),
+        ]])
+        await update.message.reply_text(
+            "🤔 *Что создать?*\n\n" + "\n".join(preview_lines),
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
 
     except Exception as e:
-        print(f"Task parse error: {e}")
         import traceback
         traceback.print_exc()
-
-
-# ─── Обработчик текста ───────────────────────────────────────────────
+        print(f"parse_task error: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при обработке запроса. Попробуй ещё раз.")
 
 async def mode_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
@@ -1277,6 +1076,13 @@ async def mode_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             await update.message.reply_text(f"❌ Не удалось распознать: {e}")
+        return
+
+    if mode == "rem_wiz_custom":
+        field = context.user_data.pop("_rem_wiz_custom_field", None)
+        context.user_data.pop("_mode", None)
+        if field:
+            await _handle_reminder_wizard_custom(update, context, field, text)
         return
 
     if not mode:
@@ -1500,6 +1306,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tasks = get_tasks()
         tasks = [t for t in tasks if str(t["id"]) not in selected]
         save_tasks(tasks)
+        # Удаляем связанные напоминания
+        try:
+            from reminders import delete_reminder, _load, _save
+            reminders = _load()
+            reminders = [r for r in reminders if str(r.get("task_id", "")) not in selected]
+            _save(reminders)
+        except Exception as e:
+            print(f"Reminder cleanup error: {e}")
+        # Удаляем связанные reminder_only задачи
+        try:
+            from storage import save_tasks
+            all_tasks = get_tasks()
+            reminder_only_ids = {
+                str(t["id"]) for t in all_tasks
+                if t.get("source") == "reminder_only" and str(t["id"]) in selected
+            }
+            if reminder_only_ids:
+                all_tasks = [t for t in all_tasks if str(t["id"]) not in reminder_only_ids]
+                save_tasks(all_tasks)
+        except Exception as e:
+            print(f"Reminder_only cleanup error: {e}")
         count = len(selected)
         context.user_data["del_selected"] = []
         await query.edit_message_reply_markup(reply_markup=None)
@@ -1606,12 +1433,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         task_id = parts[1] if len(parts) > 1 else ""
         rem_id = parts[2] if len(parts) > 2 else ""
         from reminders import delete_reminder
+        from storage import save_tasks
         if rem_id:
             delete_reminder(rem_id)
         if task_id:
-            mark_task_done(task_id)
+            tasks = get_tasks()
+            task = next((t for t in tasks if str(t["id"]) == str(task_id)), None)
+            if task and task.get("source") == "reminder_only":
+                # reminder_only — просто удаляем, не копим в базе
+                tasks = [t for t in tasks if str(t["id"]) != str(task_id)]
+                save_tasks(tasks)
+            else:
+                mark_task_done(task_id)
         await query.edit_message_reply_markup(reply_markup=None)
-        await query.message.reply_text("✅ Задача выполнена, напоминание удалено!")
+        await query.message.reply_text("✅ Готово, напоминание удалено!")
 
     elif data.startswith("rem_delete:"):
         # Удалить напоминание полностью
@@ -1761,17 +1596,86 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_reply_markup(reply_markup=None)
         await query.message.reply_text("✅ Пропущено")
 
-    elif data.startswith("ambig_task:"):
-        # Пользователь выбрал "в список задач"
-        orig_text = data.split(":", 1)[1]
+    elif data.startswith("ambig_task:") or data.startswith("ambig_remind:"):
         await query.edit_message_reply_markup(reply_markup=None)
-        await _try_parse_task_as_task(query.message, context, orig_text)
+        await query.message.reply_text("Напиши заново — я пойму 😊")
 
-    elif data.startswith("ambig_remind:"):
-        # Пользователь выбрал "просто напомнить"
-        orig_text = data.split(":", 1)[1]
+    elif data.startswith("type_task:"):
+        _ambig_key = data.split(":", 1)[1]
+        saved = context.user_data.pop(_ambig_key, None)
         await query.edit_message_reply_markup(reply_markup=None)
-        await _try_parse_as_reminder_only(query.message, context, orig_text)
+        if not saved:
+            await query.message.reply_text("❌ Данные устарели, напиши заново")
+            return
+        action = saved.get("action", "Задача")
+        deadline_iso = saved.get("deadline_iso")
+        task = add_task(action, deadline_iso, "manual")
+        dl = f" — {datetime.datetime.fromisoformat(deadline_iso).strftime("%d.%m.%Y")}" if deadline_iso else ""
+        await query.message.reply_text(
+            f"✅ *Задача добавлена!*\n\n📌 {task['title']}{dl}",
+            parse_mode="Markdown"
+        )
+
+    elif data.startswith("type_remind:"):
+        _ambig_key = data.split(":", 1)[1]
+        saved = context.user_data.pop(_ambig_key, None)
+        await query.edit_message_reply_markup(reply_markup=None)
+        if not saved:
+            await query.message.reply_text("❌ Данные устарели, напиши заново")
+            return
+        from bot.reminder_wizard import parse_reminder_intent, _set_draft, ask_next_question
+        now = datetime.datetime.now(tz=UFA_TZ)
+        orig_text = saved.get("text", "")
+        action = saved.get("action", "")
+        deadline_iso = saved.get("deadline_iso")
+        intent = await parse_reminder_intent(orig_text, now)
+        rem_text = (intent.get("reminder_text") or action or orig_text[:50]).strip()
+        if rem_text:
+            rem_text = rem_text[0].upper() + rem_text[1:]
+        date_str = intent.get("date")
+        if not date_str and deadline_iso:
+            try:
+                date_str = datetime.datetime.fromisoformat(deadline_iso).strftime("%d.%m.%Y")
+            except Exception:
+                pass
+        # Локальный расчёт времени для "через X минут/часов"
+        time_of_day = intent.get("time_of_day")
+        time_known = intent.get("time_known", False)
+        if not time_known:
+            _m = re.search(r'через\s+(\d+)\s+(?:минуту|минуты|минут|мин)', orig_text.lower())
+            if _m:
+                _dt = now + datetime.timedelta(minutes=int(_m.group(1)))
+                time_of_day = _dt.strftime("%H:%M")
+                time_known = True
+                if not date_str:
+                    date_str = _dt.strftime("%d.%m.%Y")
+            else:
+                _m = re.search(r'через\s+(\d+)\s+(?:час|часа|часов)', orig_text.lower())
+                if _m:
+                    _dt = now + datetime.timedelta(hours=int(_m.group(1)))
+                    time_of_day = _dt.strftime("%H:%M")
+                    time_known = True
+                    if not date_str:
+                        date_str = _dt.strftime("%d.%m.%Y")
+
+        draft = {
+            "reminder_text": rem_text,
+            "date": date_str,
+            "date_ambiguous": intent.get("date_ambiguous", False),
+            "date_options": intent.get("date_options", []),
+            "time_of_day": time_of_day,
+            "time_known": time_known,
+            "interval_minutes": intent.get("interval_minutes"),
+            "interval_known": intent.get("interval_known", False),
+            "times_count": intent.get("times_count"),
+            "times_known": intent.get("times_known", False),
+            "is_recurring": intent.get("is_recurring", False),
+        }
+        _set_draft(context, draft)
+        await ask_next_question(query.message, draft, context)
+
+    elif data.startswith("rem_wiz:"):
+        await _handle_reminder_wizard_callback(update, context, data)
 
     elif data.startswith("schedule:") or data.startswith("sched_cache:") or data.startswith("sched_fresh:"):
         await handle_schedule_callback(update, context)
@@ -1993,6 +1897,253 @@ async def analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(f"❌ Ошибка: {e}")
         traceback.print_exc()
 
+
+async def say_command(update, context):
+    """Озвучить текст на колонке. /say [комната] текст"""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Использование: /say текст\nИли: /say кухня текст\nКомнаты: гостиная, кухня, спальня")
+        return
+
+    from yandex_station import say_on_station, STATIONS
+
+    if args[0].lower() in STATIONS:
+        room = args[0].lower()
+        text = " ".join(args[1:])
+    else:
+        room = "гостиная"
+        text = " ".join(args)
+
+    if not text:
+        await update.message.reply_text("Укажи текст для озвучки.")
+        return
+
+    ok = await say_on_station(text, room)
+    if ok:
+        await update.message.reply_text(f"✅ Отправлено на колонку ({room}): {text}")
+    else:
+        await update.message.reply_text("❌ Не удалось отправить на колонку.")
+
+
+
+
+# ─── Reminder Wizard callbacks ────────────────────────────────────────
+
+async def _handle_reminder_wizard_callback(update, context, data: str):
+    query = update.callback_query
+    from bot.reminder_wizard import _get_draft, _set_draft, _clear_draft, ask_next_question, create_reminder_from_draft
+    parts = data.split(":", 2)
+    if len(parts) < 2:
+        await query.answer("Ошибка")
+        return
+    _ = parts[0]
+    field = parts[1] if len(parts) > 1 else ""
+    value = parts[2] if len(parts) > 2 else ""
+    draft = _get_draft(context)
+
+    if field == "cancel":
+        wiz_msgs = context.user_data.pop("_rem_wiz_msgs", [])
+        for mid in wiz_msgs:
+            try:
+                await query.bot.delete_message(chat_id=query.message.chat_id, message_id=mid)
+            except Exception:
+                pass
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        _clear_draft(context)
+        await query.message.reply_text("❌ Отменено")
+        return
+
+    if field == "confirm":
+        wiz_msgs = context.user_data.pop("_rem_wiz_msgs", [])
+        for mid in wiz_msgs:
+            try:
+                await query.bot.delete_message(chat_id=query.message.chat_id, message_id=mid)
+            except Exception:
+                pass
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        try:
+            task, reminder, first_dt = await create_reminder_from_draft(draft)
+            _clear_draft(context)
+            now = datetime.datetime.now(tz=UFA_TZ)
+            interval = draft.get("interval_minutes", 0)
+            times = draft.get("times_count", 1)
+            time_fmt = first_dt.strftime("%H:%M") if first_dt.date() == now.date() else first_dt.strftime("%d.%m в %H:%M")
+            if interval and interval > 0:
+                s = f"каждые {interval} мин" if interval < 60 else ("каждый час" if interval == 60 else f"каждые {interval//60} ч")
+                repeat_str = f"{s}, {times} раз"
+            else:
+                repeat_str = "однократно"
+            await query.message.reply_text(
+                f"✅ *Напоминание создано!*\n\n📌 {draft.get('reminder_text')}\n🕐 Первое: *{time_fmt}*\n🔁 {repeat_str}",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            _clear_draft(context)
+            print(f"create_reminder_from_draft error: {e}")
+            await query.message.reply_text(f"❌ Не удалось создать: {e}")
+        return
+
+    if field == "edit":
+        _set_draft(context, {"reminder_text": draft.get("reminder_text", ""), "is_recurring": draft.get("is_recurring", False)})
+        await query.edit_message_reply_markup(reply_markup=None)
+        await ask_next_question(query.message, _get_draft(context), context)
+        return
+
+    if field == "date":
+        if value == "custom":
+            context.user_data["_mode"] = "rem_wiz_custom"
+            context.user_data["_rem_wiz_custom_field"] = "date"
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text("📅 Введи дату:\n_Например: 15 мая, 25.05.2026, через 3 дня_", parse_mode="Markdown")
+            return
+        draft["date"] = value
+        draft["date_ambiguous"] = False
+    elif field == "time":
+        if value == "custom":
+            context.user_data["_mode"] = "rem_wiz_custom"
+            context.user_data["_rem_wiz_custom_field"] = "time"
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text("🕐 Введи время:\n_Например: 10:30, в 9 утра_", parse_mode="Markdown")
+            return
+        draft["time_of_day"] = value
+        draft["time_known"] = True
+    elif field == "interval":
+        if value == "custom":
+            context.user_data["_mode"] = "rem_wiz_custom"
+            context.user_data["_rem_wiz_custom_field"] = "interval"
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text("⏱ Введи интервал:\n_Например: 45 минут, 2 часа, раз в день_", parse_mode="Markdown")
+            return
+        draft["interval_minutes"] = int(value)
+        draft["interval_known"] = True
+        if int(value) == 0:
+            draft["times_count"] = 1
+            draft["times_known"] = True
+    elif field == "times":
+        if value == "custom":
+            context.user_data["_mode"] = "rem_wiz_custom"
+            context.user_data["_rem_wiz_custom_field"] = "times"
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text("🔁 Сколько раз напомнить?\n_Введи число_", parse_mode="Markdown")
+            return
+        draft["times_count"] = int(value)
+        draft["times_known"] = True
+
+    _set_draft(context, draft)
+    await query.edit_message_reply_markup(reply_markup=None)
+    await ask_next_question(query.message, draft, context)
+
+
+async def _handle_reminder_wizard_custom(update, context, field: str, text: str):
+    from bot.reminder_wizard import _get_draft, _set_draft, ask_next_question
+    import re as _re
+    draft = _get_draft(context)
+    now = datetime.datetime.now(tz=UFA_TZ)
+    try:
+        if field == "date":
+            dt = await _parse_dt_smart(text)
+            if not dt:
+                await update.message.reply_text("❌ Не распознал дату. Попробуй: _15 мая_, _25.05.2026_, _через 3 дня_", parse_mode="Markdown")
+                context.user_data["_mode"] = "rem_wiz_custom"
+                context.user_data["_rem_wiz_custom_field"] = "date"
+                return
+            draft["date"] = dt.strftime("%d.%m.%Y")
+            draft["date_ambiguous"] = False
+            if not (dt.hour == 23 and dt.minute == 59):
+                draft["time_of_day"] = dt.strftime("%H:%M")
+                draft["time_known"] = True
+        elif field == "time":
+            parsed_h, parsed_m = None, 0
+            tl = text.lower().strip()
+            m = _re.search(r'в?\s*(\d{1,2})\s*час', tl)
+            if m: parsed_h = int(m.group(1))
+            if parsed_h is None:
+                m = _re.search(r'(\d{1,2})\s*(?:днём|дня|день)', tl)
+                if m: parsed_h = int(m.group(1))
+            if parsed_h is None:
+                m = _re.search(r'(\d{1,2})\s*(?:вечером|вечера)', tl)
+                if m:
+                    h = int(m.group(1))
+                    parsed_h = h + 12 if h < 12 else h
+            if parsed_h is None:
+                m = _re.search(r'(\d{1,2})\s*(?:утра|утром)', tl)
+                if m:
+                    h = int(m.group(1))
+                    parsed_h = h if h >= 5 else h + 12
+            if parsed_h is None:
+                m = _re.search(r'(\d{1,2})\s*(?:ночи|ночью)', tl)
+                if m:
+                    h = int(m.group(1))
+                    parsed_h = h if h < 5 else h
+            if parsed_h is None:
+                m = _re.search(r'(\d{1,2}):(\d{2})', text)
+                if m: parsed_h, parsed_m = int(m.group(1)), int(m.group(2))
+            if parsed_h is None:
+                m = _re.search(r'^\s*(\d{1,2})\s*$', tl)
+                if m: parsed_h = int(m.group(1))
+            if parsed_h is not None and 0 <= parsed_h <= 23:
+                draft["time_of_day"] = f"{parsed_h:02d}:{parsed_m:02d}"
+                draft["time_known"] = True
+            else:
+                dt = await _parse_dt_smart(text)
+                if dt and not (dt.hour == 23 and dt.minute == 59):
+                    draft["time_of_day"] = dt.strftime("%H:%M")
+                    draft["time_known"] = True
+                else:
+                    await update.message.reply_text(
+                        "❌ Не распознал время. Попробуй: _15:00_, _в 9 утра_, _3 дня_, _вечером в 19_",
+                        parse_mode="Markdown"
+                    )
+                    context.user_data["_mode"] = "rem_wiz_custom"
+                    context.user_data["_rem_wiz_custom_field"] = "time"
+                    return
+        elif field == "interval":
+            tl = text.lower()
+            mins = None
+            m = _re.search(r'(\d+)\s*(?:минут|мин)', tl)
+            if m:
+                mins = int(m.group(1))
+            else:
+                m = _re.search(r'(\d+)\s*(?:час|часа|часов)', tl)
+                if m:
+                    mins = int(m.group(1)) * 60
+                else:
+                    m = _re.search(r'(\d+)\s*(?:день|дня|дней|сутки)', tl)
+                    if m:
+                        mins = int(m.group(1)) * 1440
+                    elif any(w in tl for w in ["раз в день","каждый день","ежедневно"]):
+                        mins = 1440
+                    elif any(w in tl for w in ["раз в час","каждый час"]):
+                        mins = 60
+            if mins is None:
+                await update.message.reply_text("❌ Не распознал интервал. Попробуй: _45 минут_, _2 часа_, _раз в день_", parse_mode="Markdown")
+                context.user_data["_mode"] = "rem_wiz_custom"
+                context.user_data["_rem_wiz_custom_field"] = "interval"
+                return
+            draft["interval_minutes"] = mins
+            draft["interval_known"] = True
+        elif field == "times":
+            m = _re.search(r'(\d+)', text)
+            if m:
+                draft["times_count"] = int(m.group(1))
+                draft["times_known"] = True
+            else:
+                await update.message.reply_text("❌ Введи число. Например: _5_", parse_mode="Markdown")
+                context.user_data["_mode"] = "rem_wiz_custom"
+                context.user_data["_rem_wiz_custom_field"] = "times"
+                return
+        _set_draft(context, draft)
+        await ask_next_question(update.message, draft, context)
+    except Exception as e:
+        print(f"_handle_reminder_wizard_custom error: {e}")
+        import traceback; traceback.print_exc()
+        await update.message.reply_text("❌ Ошибка. Попробуй ещё раз.")
 
 def register_handlers(app):
     add_conv = ConversationHandler(
