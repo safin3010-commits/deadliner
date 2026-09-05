@@ -9,9 +9,10 @@ NETOLOGY_COURSES_URL = f"{NETOLOGY_BASE_URL}/backend/api/user/programs/calendar/
 NETOLOGY_PROGRAMS_URL = f"{NETOLOGY_BASE_URL}/backend/api/user/professions/{{calendar_id}}/schedule"
 NETOLOGY_EVENTS_URL = f"{NETOLOGY_BASE_URL}/backend/api/user/programs/{{program_id}}/schedule"
 
-# Ищем дату в названии: "дедлайн 25.03.26", "дедлайн 30.12.2025", "до 11.01.26"
+# Ищем дату в названии: "дедлайн 25.03.26", "дедлайн 30.12.2025", "до 11.01.26",
+# "Дедлайн — 09.09.2026" (Нетология с 2026 использует тире-разделитель)
 _DEADLINE_RE = re.compile(
-    r"(?:рекомендованный\s+)?(?:дедлайн|до)\s+(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})",
+    r"(?:рекомендованный\s+)?(?:дедлайн|до)\s*[—\-:]?\s*(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})",
     re.IGNORECASE
 )
 
@@ -177,12 +178,15 @@ async def fetch_netology_deadlines() -> tuple[list, list]:
                             "done": False,
                         })
 
-        # Убираем задания без дедлайна из списка (оставляем только с датой)
-        homework_with_deadline = [t for t in all_homework if t.get("deadline")]
+        # С датой — впереди, без даты — следом (как в LMS)
+        homework_with_deadline = sorted(
+            [t for t in all_homework if t.get("deadline")],
+            key=lambda t: t["deadline"]
+        )
         homework_no_deadline = [t for t in all_homework if not t.get("deadline")]
 
         print(f"Netology: ДЗ с дедлайном={len(homework_with_deadline)}, без={len(homework_no_deadline)}, вебинаров={len(all_webinars)}")
-        return homework_with_deadline, all_webinars
+        return homework_with_deadline + homework_no_deadline, all_webinars
 
 
 async def fetch_netology_schedule_week(week_start: datetime.date) -> dict:
