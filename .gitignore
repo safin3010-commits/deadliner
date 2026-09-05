@@ -5,6 +5,9 @@
 # Данные (куки, кэши, seen, токены)
 data/
 
+# Личный экспорт материалов Нетологии (не код)
+netology_conspekty/
+
 # Python
 __pycache__/
 *.pyc
