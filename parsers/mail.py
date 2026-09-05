@@ -157,6 +157,7 @@ def _fetch_new_emails_sync() -> list:
     print("Mail: проверяем почту...")
     new_emails = []
 
+    mail = None
     try:
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         mail.login(YANDEX_MAIL, YANDEX_APP_PASSWORD)
@@ -164,7 +165,6 @@ def _fetch_new_emails_sync() -> list:
 
         status, message_ids = mail.uid("search", None, "UNSEEN")
         if status != "OK":
-            mail.logout()
             return []
 
         ids = message_ids[0].split()
@@ -211,13 +211,21 @@ def _fetch_new_emails_sync() -> list:
             # add_seen_message вызывается после успешной отправки в scheduler
             pass
 
-        mail.logout()
         print(f"Mail: новых писем: {len(new_emails)}")
         return new_emails
 
     except imaplib.IMAP4.error as e:
         print(f"Mail IMAP error: {e}")
         return []
+    finally:
+        if mail is not None:
+            try:
+                mail.logout()
+            except Exception:
+                try:
+                    mail.shutdown()
+                except Exception:
+                    pass
 
 
 async def fetch_new_emails() -> list:

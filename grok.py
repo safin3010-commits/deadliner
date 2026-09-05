@@ -1,11 +1,12 @@
 """
-AI клиент для ДедЛайнер — Groq (llama-3.3-70b-versatile).
+AI клиент для ДедЛайнер — Groq (openai/gpt-oss-120b).
 """
 import httpx
 import datetime
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+# llama-3.3-70b-versatile сняли с Groq в 2026 (все запросы падали 404) — заменили на gpt-oss-120b.
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 from config import GROQ_KEYS
 _groq_key_idx = 0
@@ -60,6 +61,10 @@ async def ask_grok(prompt: str, system: str = None, smart: bool = False) -> str:
                     print(f"Groq: ключ {_groq_key_idx + 1} исчерпан, переключаемся...")
                     _groq_key_idx = (_groq_key_idx + 1) % len(GROQ_KEYS)
                     continue
+                if r.status_code == 404:
+                    print(f"Groq: 404 — модель '{GROQ_MODEL}' скорее всего снята с Groq, "
+                          f"проверь актуальный список на console.groq.com/docs/models")
+                    return ""
                 r.raise_for_status()
                 content = r.json()["choices"][0]["message"]["content"] or ""
                 return content.strip()
