@@ -457,9 +457,10 @@ async def sync_all_tasks(bot=None, chat_id=None):
                     notified_changed = True
                     if in_grace:
                         continue
+                    from bot.messages import _esc_md
                     source_name = "LMS" if t.get("source") == "lms" else "Нетология"
-                    title = t.get("title", "Без названия")
-                    course = t.get("course_name", "")
+                    title = _esc_md(t.get("title", "Без названия"))
+                    course = _esc_md(t.get("course_name", ""))
                     deadline = t.get("deadline", "")
                     deadline_str = ""
                     if deadline:
@@ -818,9 +819,10 @@ async def check_user_reminders(bot, chat_id: int):
             elif times_left_after == 0:
                 next_line = "\n_Это последнее напоминание_"
 
+            from bot.messages import _esc_md
             msg_text = (
                 f"🔔 *Напоминание*\n\n"
-                f"📌 {r['task_title']}"
+                f"📌 {_esc_md(r['task_title'])}"
                 f"{deadline_line}"
                 f"{next_line}"
             )
@@ -948,8 +950,9 @@ async def check_lesson_reminders(bot, chat_id: int):
                 if str(lesson_key) in sent:
                     continue
 
-                name = lesson.get("course_name") or lesson.get("name", "Занятие")
-                location = lesson.get("location", "")
+                from bot.messages import _esc_md
+                name = _esc_md(lesson.get("course_name") or lesson.get("name", "Занятие"))
+                location = _esc_md(lesson.get("location", ""))
                 start_str = start_dt.strftime("%H:%M")
 
                 text = f"🔔 *Modeus*\n\n🔔 *Пара через 15 минут!*\n{'─' * 20}\n📚 {name}\n🕐 Начало: {start_str}"
@@ -1119,8 +1122,9 @@ async def _send_random_motivation(bot, chat_id: int):
             lines.append("")
 
         if urgent_task:
+            from bot.messages import _esc_md
             course = _short_course(urgent_task.get("course_name", ""))
-            title = urgent_task.get("title", "")
+            title = _esc_md(urgent_task.get("title", ""))
             date = _format_date(urgent_task.get("deadline"))
             deadline_emoji = "🔴" if min_days == 0 else "🟡" if min_days <= 3 else "🟢"
             task_str = f"{course} — {title}" if course else title
@@ -1167,10 +1171,11 @@ async def send_weekly_report(bot, chat_id: int):
             lines.append(week_summary)
             lines.append("")
         if overdue:
+            from bot.messages import _esc_md
             lines.append(f"⚠️ Просроченных задач: *{len(overdue)}*")
             for t in overdue[:3]:
-                course = t.get("course_name", "")[:25]
-                lines.append(f"  • {course} — {t.get('title','')[:40]}")
+                course = _esc_md(t.get("course_name", "")[:25])
+                lines.append(f"  • {course} — {_esc_md(t.get('title','')[:40])}")
             lines.append("")
 
         await send_with_retry(bot, chat_id, "\n".join(lines))
@@ -1552,11 +1557,12 @@ async def send_morning_briefing(bot, chat_id: int):
                 except Exception:
                     date_str = ""
                 course = _short_course(t.get("course_name", ""))
-                # Обрезаем длинные названия
+                # Обрезаем длинные названия (до экранирования)
                 if len(title) > 40:
                     title = title[:37] + "…"
+                from bot.messages import _esc_md
                 prefix = f"{course} — " if course else ""
-                lines.append(f"❗️  {date_str}  —  {prefix}{title}")
+                lines.append(f"❗️  {date_str}  —  {prefix}{_esc_md(title)}")
                 shown += 1
                 if shown >= 5:
                     break
@@ -1578,8 +1584,9 @@ async def send_morning_briefing(bot, chat_id: int):
                     date_str = dt.strftime("%d.%m")
                 except Exception:
                     date_str = ""
+                from bot.messages import _esc_md
                 prefix = f"{course} — " if course else ""
-                lines.append(f"📌 Ближайшее: {prefix}{t['title'][:40]}  •  {date_str}")
+                lines.append(f"📌 Ближайшее: {prefix}{_esc_md(t['title'][:40])}  •  {date_str}")
         else:
             lines.append("✅ Все задания выполнены!")
 
@@ -1642,11 +1649,12 @@ async def send_midday_briefing(bot, chat_id: int):
         )
         if nearest:
             t = nearest[0]
-            from bot.messages import _short_course
+            from bot.messages import _short_course, _esc_md
             course = _short_course(t.get("course_name", ""))
             title = t.get("title", "")
             if len(title) > 40:
                 title = title[:37] + "…"
+            title = _esc_md(title)
             _days_short = ["пн","вт","ср","чт","пт","сб","вс"]
             try:
                 dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
@@ -1799,11 +1807,12 @@ async def send_evening_briefing(bot, chat_id: int):
         # Закрой до сна — самая ближайшая задача
         if upcoming_tasks:
             days_left, t = upcoming_tasks[0]
-            from bot.messages import _short_course
+            from bot.messages import _short_course, _esc_md
             course = _short_course(t.get("course_name", ""))
             title = t.get("title", "")
             if len(title) > 40:
                 title = title[:37] + "…"
+            title = _esc_md(title)
             try:
                 dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
                 date_str = f"{dt.strftime('%d.%m')} {_days_short[dt.weekday()]}"
@@ -1818,11 +1827,12 @@ async def send_evening_briefing(bot, chat_id: int):
         if len(upcoming_tasks) > 1:
             lines.append("📌 *Ближайшие задачи:*")
             for days_left, t in upcoming_tasks[1:4]:
-                from bot.messages import _short_course
+                from bot.messages import _short_course, _esc_md
                 course = _short_course(t.get("course_name", ""))
                 title = t.get("title", "")
                 if len(title) > 40:
                     title = title[:37] + "…"
+                title = _esc_md(title)
                 try:
                     dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
                     date_str = f"{dt.strftime('%d.%m')} {_days_short[dt.weekday()]}"
@@ -2319,7 +2329,8 @@ async def send_afternoon_reminder(bot, chat_id: int):
                 title = t.get("title", "")
                 if len(title) > 40:
                     title = title[:37] + "…"
-                from bot.messages import _short_course
+                from bot.messages import _short_course, _esc_md
+                title = _esc_md(title)
                 course = _short_course(t.get("course_name", ""))
                 try:
                     dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)

@@ -4,6 +4,7 @@
 import datetime
 import re
 from config import UFA_TZ
+from bot.messages import _esc_md
 
 DRAFT_KEY = "_rem_draft"
 
@@ -128,7 +129,7 @@ def _make_keyboard(buttons):
 
 
 def draft_summary(draft: dict) -> str:
-    lines = ["🔔 *" + draft.get("reminder_text", "?") + "*\n"]
+    lines = ["🔔 *" + _esc_md(draft.get("reminder_text", "?")) + "*\n"]
     if draft.get("date"):
         lines.append("📅 Дата: *" + draft["date"] + "*")
     if draft.get("time_of_day"):
@@ -257,7 +258,7 @@ async def show_confirmation(message, draft: dict):
         repeat_str = "однократно"
     text = (
         "✅ *Всё понял! Создаю напоминание:*\n\n"
-        "📌 " + draft.get("reminder_text", "?") + "\n"
+        "📌 " + _esc_md(draft.get("reminder_text", "?")) + "\n"
         "🕐 Первое: *" + time_fmt + "*\n"
         "🔁 " + repeat_str
     )

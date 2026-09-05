@@ -56,6 +56,16 @@ def _sl(val) -> str:
     return _s(val).lower()
 
 
+def _esc_md(val) -> str:
+    """Экранируем спецсимволы Markdown (legacy), иначе внешний текст (заголовки
+    заданий, имена преподавателей и т.п.) может содержать одиночный _ * ` [
+    и сломать parse_mode='Markdown' для всего сообщения."""
+    s = _s(val)
+    for ch in ("\\", "_", "*", "`", "["):
+        s = s.replace(ch, "\\" + ch)
+    return s
+
+
 def _short_course(course: str, title: str = "") -> str:
     """Укорачиваем длинные названия курсов."""
     course = _s(course) or _s(title)[:30]
@@ -64,8 +74,8 @@ def _short_course(course: str, title: str = "") -> str:
             return short
     # Если длиннее 30 символов — обрезаем
     if len(course) > 30:
-        return course[:28] + "…"
-    return course
+        return _esc_md(course[:28] + "…")
+    return _esc_md(course)
 
 
 def _deadline_emoji(deadline_str: str | None) -> str:
@@ -200,9 +210,10 @@ def tasks_list_filtered(tasks: list, filter_type: str) -> str:
             emoji = _deadline_emoji(t.get("deadline"))
             date = _format_date(t.get("deadline"))
             title = _s(t.get("title"))
-            # Укорачиваем название если длинное
+            # Укорачиваем название если длинное (до экранирования, чтобы не резать посреди \escape)
             if len(title) > 45:
                 title = title[:43] + "…"
+            title = _esc_md(title)
             if date:
                 lines.append(f"  {emoji} {title} — _{date}_")
             else:
@@ -222,7 +233,7 @@ def tasks_list_filtered(tasks: list, filter_type: str) -> str:
             lines.append("🔔 *Активные напоминания*")
             _now3 = _dt2.datetime.now(tz=UFA_TZ)
             for r in active:
-                _title = r.get("task_title", "")[:35]
+                _title = _esc_md(r.get("task_title", "")[:35])
                 _times = r.get("times_left", 0)
                 _interval = r.get("interval_minutes", 0)
                 try:
@@ -322,7 +333,7 @@ def _lesson_suffix(lesson: dict) -> str:
     if desc:
         dl = desc.lower()
         if any(x in dl for x in ["лекц", "практ", "семин", "лаб", "вебин", "test", "revision", "achievement", "занятие"]):
-            parts.append(desc)
+            parts.append(_esc_md(desc))
     if "lxp" in location:
         parts.append("LXP")
     return ". ".join(parts) if parts else ""
@@ -355,7 +366,7 @@ def format_schedule_by_day(schedule_by_day: dict, title: str) -> str:
         for lesson in _expand_and_sort(lessons):
             emoji = _lesson_emoji(lesson)
             start = _s(lesson.get("start_time"))
-            name = _s(lesson.get("course_name")) or _s(lesson.get("name"))
+            name = _esc_md(lesson.get("course_name")) or _esc_md(lesson.get("name"))
             suffix = _lesson_suffix(lesson)
             if suffix:
                 lines.append(f"{emoji} {start} — {name}. {suffix}")
@@ -388,7 +399,7 @@ def schedule_today(schedule: list) -> str:
             emoji = _lesson_emoji(lesson)
 
         start = _s(lesson.get("start_time"))
-        name = _s(lesson.get("course_name")) or _s(lesson.get("name"))
+        name = _esc_md(lesson.get("course_name")) or _esc_md(lesson.get("name"))
         suffix = _lesson_suffix(lesson)
         if suffix:
             lines.append(f"{emoji} {start} — {name}. {suffix}")
@@ -451,7 +462,7 @@ def morning_briefing(schedule: list, tasks: list) -> str:
         lines.append("📅 *Сегодня:*")
         for lesson in _expand_and_sort(schedule):
             emoji = _lesson_emoji(lesson)
-            name = _s(lesson.get("course_name")) or _s(lesson.get("name"))
+            name = _esc_md(lesson.get("course_name")) or _esc_md(lesson.get("name"))
             lines.append(f"  {emoji} {lesson['start_time']} — {name}")
     else:
         lines.append("📅 Пар сегодня нет 🎉")
@@ -465,7 +476,7 @@ def morning_briefing(schedule: list, tasks: list) -> str:
         lines.append(f"⚠️ *Срочных заданий: {len(urgent)}*")
         for t in urgent[:3]:
             date = _format_date(t.get("deadline"))
-            lines.append(f"  🔴 {_short_course(t.get('course_name',''))} — {t['title'][:35]}")
+            lines.append(f"  🔴 {_short_course(t.get('course_name',''))} — {_esc_md(t['title'][:35])}")
         if len(urgent) > 3:
             lines.append(f"  _...и ещё {len(urgent) - 3}_")
     elif pending:
@@ -486,7 +497,7 @@ def evening_reminder(tasks: list) -> str:
     if due_tomorrow:
         lines.append("⚠️ *Завтра дедлайн:*")
         for task in due_tomorrow:
-            lines.append(f"  🔴 {_short_course(task.get('course_name',''))} — {task['title'][:40]}")
+            lines.append(f"  🔴 {_short_course(task.get('course_name',''))} — {_esc_md(task['title'][:40])}")
     else:
         lines.append("✅ Завтра дедлайнов нет")
     return "\n".join(lines)
@@ -501,7 +512,7 @@ def deadline_reminder(task: dict, days_left: int) -> str:
         f"\n"
         f"{emoji} *Напоминание о дедлайне*\n"
         f"{'─' * 20}\n"
-        f"📌 {task['title']}\n"
+        f"📌 {_esc_md(task['title'])}\n"
         f"📚 {_short_course(task.get('course_name', ''))}\n"
         f"⏰ {deadline}"
     )
@@ -555,9 +566,9 @@ def new_grade_message(grade: dict) -> str:
     """Уведомление о новой/изменённой оценке."""
     source_name = {"lms": "LMS ТюмГУ", "modeus": "Modeus"}.get(grade.get("source", ""), "Оценка")
     course = _short_course(grade.get("course_name", ""))
-    title = grade.get("subject_name") or grade.get("title", "")
-    g = grade.get("value") or grade.get("grade", "")
-    old_g = grade.get("old_value") or grade.get("old_grade")
+    title = _esc_md(grade.get("subject_name") or grade.get("title", ""))
+    g = _esc_md(grade.get("value") or grade.get("grade", ""))
+    old_g = _esc_md(grade.get("old_value") or grade.get("old_grade"))
 
     try:
         g_num = float(str(g).replace(",", "."))
@@ -584,16 +595,16 @@ def new_grade_message(grade: dict) -> str:
         lines.append(f"📌 {title}")
     lines.append(f"🎯 {change}")
     if grade.get("updated_by") or grade.get("by"):
-        lines.append(f"👤 _{grade.get('updated_by') or grade.get('by')}_")
+        lines.append(f"👤 _{_esc_md(grade.get('updated_by') or grade.get('by'))}_")
     if grade.get("course_total"):
-        lines.append(f"\n📊 Текущий итог: *{grade['course_total']}*")
+        lines.append(f"\n📊 Текущий итог: *{_esc_md(grade['course_total'])}*")
 
     return "\n".join(lines)
 
 
 def lesson_reminder(lesson: dict, minutes_before: int = 30) -> str:
     """Уведомление за N минут до пары."""
-    name = _s(lesson.get("course_name")) or _s(lesson.get("name"))
+    name = _esc_md(lesson.get("course_name")) or _esc_md(lesson.get("name"))
     start = _s(lesson.get("start_time"))
     location = _s(lesson.get("location"))
     pair_numbers = {
@@ -602,7 +613,7 @@ def lesson_reminder(lesson: dict, minutes_before: int = 30) -> str:
     }
     pair_num = pair_numbers.get(start)
     num_str = f" ({pair_num}-я пара)" if pair_num else ""
-    loc_str = f"\n📍 {location}" if location and "lxp" not in location.lower() else ""
+    loc_str = f"\n📍 {_esc_md(location)}" if location and "lxp" not in location.lower() else ""
     lxp_str = "\n🔵 _онлайн (LXP)_" if location and "lxp" in location.lower() else ""
     return (
         f"🔔 *Modeus*\n"
@@ -647,7 +658,7 @@ def format_subject_grades(data: dict) -> str:
     absent = sum(1 for l in lessons if l.get("attendance") == "ABSENT")
     total_lessons = present + absent
 
-    lines = [f"📚 *{course}*"]
+    lines = [f"📚 *{_esc_md(course)}*"]
 
     # Посещаемость в одну строку
     if total_lessons:
@@ -665,12 +676,13 @@ def format_subject_grades(data: dict) -> str:
         score_str = ""
         if scores:
             score_str = "  🎯 " + ", ".join(
-                f"*{s['value']}*" + (f" _{s['type']}_" if s.get("type") else "")
+                f"*{_esc_md(s['value'])}*" + (f" _{_esc_md(s['type'])}_" if s.get("type") else "")
                 for s in scores
             )
 
-        # Обрезаем тему до 30 символов
+        # Обрезаем тему до 30 символов (до экранирования)
         name_short = name[:30] + "…" if len(name) > 30 else name
+        name_short = _esc_md(name_short)
 
         line = f"{att_icon} *{date}*"
         if name_short:
@@ -746,12 +758,12 @@ def format_grade_notification_new(grade: dict) -> str:
 
     grade_type = grade.get("type", "")
     course = _short_course(grade.get("course", "") or grade.get("course_name", ""))
-    subject = grade.get("subject", "") or grade.get("subject_name", "")
-    value = grade.get("value", "")
-    old_value = grade.get("old_value")
+    subject = _esc_md(grade.get("subject", "") or grade.get("subject_name", ""))
+    value = _esc_md(grade.get("value", ""))
+    old_value = _esc_md(grade.get("old_value"))
     attendance = grade.get("attendance", "")
     lesson_date = fmt_date(grade.get("lesson_date", ""))
-    by = grade.get("by", "") or grade.get("updated_by", "")
+    by = _esc_md(grade.get("by", "") or grade.get("updated_by", ""))
 
     lines = []
 
@@ -781,7 +793,7 @@ def format_grade_notification_new(grade: dict) -> str:
         if by:
             lines.append(f"👤 _{by}_")
         if grade.get("course_total"):
-            lines.append(f"\n📊 Текущий итог: *{grade['course_total']}*")
+            lines.append(f"\n📊 Текущий итог: *{_esc_md(grade['course_total'])}*")
 
     elif grade_type == "current_total":
         lines.append(f"🎓 *Modeus*")
@@ -808,10 +820,10 @@ def format_grade_notification_new(grade: dict) -> str:
 def format_lms_grade_notification(grade: dict) -> str:
     """Уведомление о новой оценке из LMS — формат как у Modeus."""
     course = _short_course(grade.get("course_name", ""))
-    title = grade.get("title", "")
-    value = grade.get("value", "")
-    old_value = grade.get("old_value")
-    by = grade.get("updated_by") or grade.get("by", "")
+    title = _esc_md(grade.get("title", ""))
+    value = _esc_md(grade.get("value", ""))
+    old_value = _esc_md(grade.get("old_value"))
+    by = _esc_md(grade.get("updated_by") or grade.get("by", ""))
 
     if old_value:
         header = "🎓 *Оценка изменена* — LMS ТюмГУ"

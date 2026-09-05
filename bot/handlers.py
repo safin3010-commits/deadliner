@@ -16,7 +16,7 @@ from bot.keyboards import (
     reminder_task_keyboard, active_reminders_keyboard,
 )
 from bot.messages import (
-    tasks_list_filtered, schedule_today, schedule_week, schedule_month
+    tasks_list_filtered, schedule_today, schedule_week, schedule_month, _esc_md
 )
 
 WAITING_TITLE = 1
@@ -509,7 +509,7 @@ async def add_deadline_received(update: Update, context: ContextTypes.DEFAULT_TY
     if text.lower() in ["без даты", "нет", "-", "no"]:
         task = add_task(title, None, "manual")
         await update.message.reply_text(
-            f"✅ *Задача добавлена без даты!*\n\n📌 {task['title']}",
+            f"✅ *Задача добавлена без даты!*\n\n📌 {_esc_md(task['title'])}",
             parse_mode="Markdown"
         )
         return ConversationHandler.END
@@ -522,7 +522,7 @@ async def add_deadline_received(update: Update, context: ContextTypes.DEFAULT_TY
         return WAITING_DEADLINE
     task = add_task(title, dt.isoformat(), "manual")
     await update.message.reply_text(
-        f"✅ *Задача добавлена!*\n\n📌 {task['title']}\n⏰ {dt.strftime('%d.%m.%Y %H:%M')}",
+        f"✅ *Задача добавлена!*\n\n📌 {_esc_md(task['title'])}\n⏰ {dt.strftime('%d.%m.%Y %H:%M')}",
         parse_mode="Markdown"
     )
     return ConversationHandler.END
@@ -574,7 +574,7 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from reminders import format_interval
         lines.append("*Активные:*")
         for r in active:
-            lines.append(f"  • {r['task_title'][:30]} — {format_interval(r['interval_minutes'])}, осталось ×{r['times_left']}")
+            lines.append(f"  • {_esc_md(r['task_title'][:30])} — {format_interval(r['interval_minutes'])}, осталось ×{r['times_left']}")
         lines.append("")
 
     lines.append("Выбери задачу чтобы добавить напоминание:")
@@ -610,7 +610,7 @@ async def _try_parse_task_as_task(message, context, text: str):
     if not title:
         title = text.strip()
     task = add_task(title, dt.isoformat() if dt else None, "manual")
-    line = f"📌 {task['title']}"
+    line = f"📌 {_esc_md(task['title'])}"
     if dt:
         line += f" — {dt.strftime('%d.%m.%Y')}"
     await message.reply_text(f"✅ *Задача добавлена!*\n\n{line}", parse_mode="Markdown")
@@ -652,7 +652,7 @@ async def _try_parse_as_reminder_only(message, context, text: str):
         from reminders import add_reminder
         add_reminder(str(task["id"]), rem_text, delay_mins, 1, start_at=rem_dt.isoformat())
         time_fmt = rem_dt.strftime("%H:%M") if rem_dt.date() == now.date() else rem_dt.strftime("%d.%m %H:%M")
-        await message.reply_text(f"🔔 *Напомню в {time_fmt}*\n\n_{rem_text}_", parse_mode="Markdown")
+        await message.reply_text(f"🔔 *Напомню в {time_fmt}*\n\n_{_esc_md(rem_text)}_", parse_mode="Markdown")
         return
 
     # Фоллбэк на ИИ — для сложных случаев типа "завтра утром"
@@ -681,7 +681,7 @@ async def _try_parse_as_reminder_only(message, context, text: str):
         from reminders import add_reminder
         add_reminder(str(task["id"]), rem_text, delay_mins, 1, start_at=rem_dt.isoformat())
         time_fmt = rem_dt.strftime("%H:%M") if rem_dt.date() == now.date() else rem_dt.strftime("%d.%m %H:%M")
-        await message.reply_text(f"🔔 *Напомню в {time_fmt}*\n\n_{rem_text}_", parse_mode="Markdown")
+        await message.reply_text(f"🔔 *Напомню в {time_fmt}*\n\n_{_esc_md(rem_text)}_", parse_mode="Markdown")
     except Exception as e:
         await message.reply_text(f"❌ Не удалось установить напоминание: {e}")
 
@@ -930,7 +930,7 @@ async def _try_parse_task_from_text(update, context, text: str):
                     deadline_dt = await _parse_deadline(item.get("deadline"))
                     task = add_task(action, deadline_dt.isoformat() if deadline_dt else None, "manual")
                     dl = f" — {deadline_dt.strftime('%d.%m.%Y')}" if deadline_dt else ""
-                    added.append(f"📌 {task['title']}{dl}")
+                    added.append(f"📌 {_esc_md(task['title'])}{dl}")
                 if added:
                     await update.message.reply_text(
                         "✅ *Задачи добавлены:*\n\n" + "\n".join(added),
@@ -1074,7 +1074,7 @@ async def mode_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             interval_str = format_interval(interval) if interval > 0 else "однократно"
             await update.message.reply_text(
                 f"🔔 *Напоминание установлено!*\n\n"
-                f"📌 {task_title}\n"
+                f"📌 {_esc_md(task_title)}\n"
                 f"⏱ {interval_str}, {times} раз{start_fmt}",
                 parse_mode="Markdown"
             )
@@ -1170,7 +1170,7 @@ async def _handle_mode(update, context, mode: str, text: str):
         if text.lower() in ["без даты", "нет", "-"]:
             task = add_task(title, None, source)
             await update.message.reply_text(
-                f"✅ *Задача добавлена без даты!*\n\n📌 {task['title']}",
+                f"✅ *Задача добавлена без даты!*\n\n📌 {_esc_md(task['title'])}",
                 parse_mode="Markdown"
             )
             return
@@ -1186,7 +1186,7 @@ async def _handle_mode(update, context, mode: str, text: str):
 
         task = add_task(title, dt.isoformat(), source)
         await update.message.reply_text(
-            f"✅ *Задача добавлена!*\n\n📌 {task['title']}\n⏰ {dt.strftime('%d.%m.%Y')}",
+            f"✅ *Задача добавлена!*\n\n📌 {_esc_md(task['title'])}\n⏰ {dt.strftime('%d.%m.%Y')}",
             parse_mode="Markdown"
         )
 
@@ -1368,7 +1368,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("❌ Задача не найдена")
             return
         await query.message.reply_text(
-            f"✏️ *{task['title'][:50]}*\nЧто изменить?",
+            f"✏️ *{_esc_md(task['title'][:50])}*\nЧто изменить?",
             reply_markup=edit_task_action_keyboard(task_id, back_filter),
             parse_mode="Markdown"
         )
@@ -1508,7 +1508,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["_remind_task_title"] = task.get("title", "Задача")
         await query.edit_message_reply_markup(reply_markup=None)
         await query.message.reply_text(
-            f"🔔 *{task['title'][:50]}*\n\n"
+            f"🔔 *{_esc_md(task['title'][:50])}*\n\n"
             f"Напиши когда и как часто напоминать:\n"
             f"_Например: 'каждый час 3 раза' или 'каждые 30 минут 5 раз'_",
             parse_mode="Markdown"
@@ -1628,7 +1628,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         task = add_task(action, deadline_iso, "manual")
         dl = f" — {datetime.datetime.fromisoformat(deadline_iso).strftime("%d.%m.%Y")}" if deadline_iso else ""
         await query.message.reply_text(
-            f"✅ *Задача добавлена!*\n\n📌 {task['title']}{dl}",
+            f"✅ *Задача добавлена!*\n\n📌 {_esc_md(task['title'])}{dl}",
             parse_mode="Markdown"
         )
 
@@ -2003,7 +2003,7 @@ async def _handle_reminder_wizard_callback(update, context, data: str):
             else:
                 repeat_str = "однократно"
             await query.message.reply_text(
-                f"✅ *Напоминание создано!*\n\n📌 {draft.get('reminder_text')}\n🕐 Первое: *{time_fmt}*\n🔁 {repeat_str}",
+                f"✅ *Напоминание создано!*\n\n📌 {_esc_md(draft.get('reminder_text'))}\n🕐 Первое: *{time_fmt}*\n🔁 {repeat_str}",
                 parse_mode="Markdown"
             )
         except Exception as e:

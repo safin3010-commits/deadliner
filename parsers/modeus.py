@@ -41,7 +41,7 @@ def _save_schedule_cache(cache: dict):
 def _get_cached_week(week_start: datetime.date) -> dict | None:
     cache = _load_schedule_cache()
     entry = cache.get(week_start.isoformat())
-    if not entry:
+    if not entry or "cached_at" not in entry:
         return None
     cached_at = datetime.datetime.fromisoformat(entry["cached_at"])
     age_hours = (datetime.datetime.now(tz=datetime.UTC) - cached_at).total_seconds() / 3600
