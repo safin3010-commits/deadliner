@@ -6,7 +6,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton("📋 Задания"), KeyboardButton("📅 Расписание")],
         [KeyboardButton("🎓 Оценки")],
     ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
 def tasks_filter_keyboard() -> InlineKeyboardMarkup:
