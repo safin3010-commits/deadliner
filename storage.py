@@ -73,7 +73,7 @@ def add_task(title: str, deadline: str | None, source: str) -> dict:
     save_tasks(tasks)
     return task
 
-def mark_task_done(task_id) -> bool:
+def mark_task_done(task_id, manually: bool = False) -> bool:
     """Отмечаем задачу выполненной. task_id может быть int или str."""
     import datetime
     from config import UFA_TZ
@@ -82,6 +82,8 @@ def mark_task_done(task_id) -> bool:
         if str(task["id"]) == str(task_id):
             task["done"] = True
             task["done_at"] = datetime.datetime.now(tz=UFA_TZ).isoformat()
+            if manually:
+                task["manually_done"] = True
             save_tasks(tasks)
             return True
     return False
@@ -155,8 +157,9 @@ def mark_lms_tasks_done(completed_ids: set, parser_tasks: list = None) -> int:
             print(f"LMS done by ID: {task.get('title','')[:40]}")
             continue
 
-        # Способ 2 отключён — парсер фильтрует по дедлайну, задачи без дедлайна
-        # ошибочно помечались выполненными
+        # Способ 2: отключён — исчезновение из парсера не означает выполнение.
+        # Парсер может не вернуть задачу из-за сетевой ошибки, таймаута или нестандартного HTML.
+        # Задача помечается выполненной только по прямому ID оценки (Способ 1).
 
     if count:
         save_tasks(tasks)

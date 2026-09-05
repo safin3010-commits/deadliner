@@ -963,11 +963,15 @@ async def _try_parse_task_from_text(update, context, text: str):
             InlineKeyboardButton("📋 Задача", callback_data=f"type_task:{_ambig_key}"),
             InlineKeyboardButton("🔔 Напоминание", callback_data=f"type_remind:{_ambig_key}"),
         ]])
-        await update.message.reply_text(
+        sent = await update.message.reply_text(
             "🤔 *Что создать?*\n\n" + "\n".join(preview_lines),
             reply_markup=kb,
             parse_mode="Markdown"
         )
+        # Сохраняем для удаления при создании напоминания
+        msgs = context.user_data.get("_rem_wiz_msgs", [])
+        msgs.append(sent.message_id)
+        context.user_data["_rem_wiz_msgs"] = msgs
 
     except Exception as e:
         import traceback
@@ -1233,7 +1237,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not selected:
             await query.answer("Ничего не выбрано!")
             return
-        count = sum(1 for tid in selected if mark_task_done(tid))
+        count = sum(1 for tid in selected if mark_task_done(tid, manually=True))
         context.user_data["done_selected"] = []
         await query.edit_message_reply_markup(reply_markup=None)
 
@@ -1444,15 +1448,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 tasks = [t for t in tasks if str(t["id"]) != str(task_id)]
                 save_tasks(tasks)
             else:
-                mark_task_done(task_id)
+                mark_task_done(task_id, manually=True)
         await query.edit_message_reply_markup(reply_markup=None)
         await query.message.reply_text("✅ Готово, напоминание удалено!")
 
     elif data.startswith("rem_delete:"):
-        # Удалить напоминание полностью
+        # Удалить напоминание и связанную reminder_only задачу
         rem_id = data.split(":")[1]
-        from reminders import delete_reminder
+        from reminders import delete_reminder, _load
+        # Находим task_id до удаления
+        rems = _load()
+        rem_obj = next((r for r in rems if r["id"] == rem_id), None)
         delete_reminder(rem_id)
+        if rem_obj:
+            tid = str(rem_obj.get("task_id", ""))
+            if tid:
+                from storage import save_tasks
+                all_tasks = get_tasks()
+                task_obj = next((t for t in all_tasks if str(t["id"]) == tid), None)
+                if task_obj and task_obj.get("source") == "reminder_only":
+                    all_tasks = [t for t in all_tasks if str(t["id"]) != tid]
+                    save_tasks(all_tasks)
         await query.edit_message_reply_markup(reply_markup=None)
         await query.answer("🗑 Напоминание удалено")
 
@@ -1658,6 +1674,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if not date_str:
                         date_str = _dt.strftime("%d.%m.%Y")
 
+        # Если дата не указана и это повторяющееся — включаем daily_mode
+        is_daily = not date_str and intent.get("is_recurring", False)
+
         draft = {
             "reminder_text": rem_text,
             "date": date_str,
@@ -1670,6 +1689,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "times_count": intent.get("times_count"),
             "times_known": intent.get("times_known", False),
             "is_recurring": intent.get("is_recurring", False),
+            "daily_mode": is_daily,
         }
         _set_draft(context, draft)
         await ask_next_question(query.message, draft, context)
@@ -1701,7 +1721,7 @@ async def itog_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mark_evening_reported()
         streak = streak_result["streak"]
         tasks = get_tasks()
-        done_today = len([t for t in tasks if t.get("done")])
+        done_today = len([t for t in tasks if t.get("manually_done")])
         pending = len([t for t in tasks if not t.get("done")])
         grok_text = await grok_evening_analysis(report, done_today, pending, streak)
         emoji = streak_emoji(streak)
@@ -1960,7 +1980,7 @@ async def _handle_reminder_wizard_callback(update, context, data: str):
         wiz_msgs = context.user_data.pop("_rem_wiz_msgs", [])
         for mid in wiz_msgs:
             try:
-                await query.bot.delete_message(chat_id=query.message.chat_id, message_id=mid)
+                await context.bot.delete_message(chat_id=query.message.chat_id, message_id=mid)
             except Exception:
                 pass
         try:
@@ -1976,7 +1996,10 @@ async def _handle_reminder_wizard_callback(update, context, data: str):
             time_fmt = first_dt.strftime("%H:%M") if first_dt.date() == now.date() else first_dt.strftime("%d.%m в %H:%M")
             if interval and interval > 0:
                 s = f"каждые {interval} мин" if interval < 60 else ("каждый час" if interval == 60 else f"каждые {interval//60} ч")
-                repeat_str = f"{s}, {times} раз"
+                if times >= 9999:
+                    repeat_str = f"{s}, каждый день"
+                else:
+                    repeat_str = f"{s}, {times} раз"
             else:
                 repeat_str = "однократно"
             await query.message.reply_text(
@@ -2002,8 +2025,15 @@ async def _handle_reminder_wizard_callback(update, context, data: str):
             await query.edit_message_reply_markup(reply_markup=None)
             await query.message.reply_text("📅 Введи дату:\n_Например: 15 мая, 25.05.2026, через 3 дня_", parse_mode="Markdown")
             return
-        draft["date"] = value
-        draft["date_ambiguous"] = False
+        if value == "daily":
+            # Ежедневный режим — начинаем с сегодня
+            now_daily = datetime.datetime.now(tz=UFA_TZ)
+            draft["date"] = now_daily.strftime("%d.%m.%Y")
+            draft["date_ambiguous"] = False
+            draft["daily_mode"] = True
+        else:
+            draft["date"] = value
+            draft["date_ambiguous"] = False
     elif field == "time":
         if value == "custom":
             context.user_data["_mode"] = "rem_wiz_custom"
@@ -2025,6 +2055,21 @@ async def _handle_reminder_wizard_callback(update, context, data: str):
         if int(value) == 0:
             draft["times_count"] = 1
             draft["times_known"] = True
+    elif field == "daily_times":
+        times_per_day = int(value)
+        existing_interval = draft.get("interval_minutes")
+        if existing_interval and existing_interval > 0:
+            interval = existing_interval
+        else:
+            interval = max(1, 840 // times_per_day)
+            draft["interval_minutes"] = interval
+            draft["interval_known"] = True
+        draft["times_count"] = 9999
+        draft["times_known"] = True
+        draft["times_confirmed"] = True
+        draft["daily_times_confirmed"] = True
+        draft["daily_times_per_day"] = times_per_day
+
     elif field == "times":
         if value == "custom":
             context.user_data["_mode"] = "rem_wiz_custom"
@@ -2034,6 +2079,7 @@ async def _handle_reminder_wizard_callback(update, context, data: str):
             return
         draft["times_count"] = int(value)
         draft["times_known"] = True
+        draft["times_confirmed"] = True
 
     _set_draft(context, draft)
     await query.edit_message_reply_markup(reply_markup=None)
@@ -2047,9 +2093,15 @@ async def _handle_reminder_wizard_custom(update, context, field: str, text: str)
     now = datetime.datetime.now(tz=UFA_TZ)
     try:
         if field == "date":
-            dt = await _parse_dt_smart(text)
+            # Обрабатываем "каждый день" / "ежедневно" как сегодня + daily_mode
+            tl_date = text.lower().strip()
+            if any(w in tl_date for w in ["каждый день", "ежедневно", "каждый", "daily"]):
+                dt = datetime.datetime.now(tz=UFA_TZ)
+                draft["daily_mode"] = True
+            else:
+                dt = await _parse_dt_smart(text)
             if not dt:
-                await update.message.reply_text("❌ Не распознал дату. Попробуй: _15 мая_, _25.05.2026_, _через 3 дня_", parse_mode="Markdown")
+                await update.message.reply_text("❌ Не распознал дату. Попробуй: _15 мая_, _25.05.2026_, _через 3 дня_, _сегодня_, _каждый день_", parse_mode="Markdown")
                 context.user_data["_mode"] = "rem_wiz_custom"
                 context.user_data["_rem_wiz_custom_field"] = "date"
                 return
@@ -2059,45 +2111,42 @@ async def _handle_reminder_wizard_custom(update, context, field: str, text: str)
                 draft["time_of_day"] = dt.strftime("%H:%M")
                 draft["time_known"] = True
         elif field == "time":
-            parsed_h, parsed_m = None, 0
-            tl = text.lower().strip()
-            m = _re.search(r'в?\s*(\d{1,2})\s*час', tl)
-            if m: parsed_h = int(m.group(1))
-            if parsed_h is None:
-                m = _re.search(r'(\d{1,2})\s*(?:днём|дня|день)', tl)
-                if m: parsed_h = int(m.group(1))
-            if parsed_h is None:
-                m = _re.search(r'(\d{1,2})\s*(?:вечером|вечера)', tl)
-                if m:
-                    h = int(m.group(1))
-                    parsed_h = h + 12 if h < 12 else h
-            if parsed_h is None:
-                m = _re.search(r'(\d{1,2})\s*(?:утра|утром)', tl)
-                if m:
-                    h = int(m.group(1))
-                    parsed_h = h if h >= 5 else h + 12
-            if parsed_h is None:
-                m = _re.search(r'(\d{1,2})\s*(?:ночи|ночью)', tl)
-                if m:
-                    h = int(m.group(1))
-                    parsed_h = h if h < 5 else h
-            if parsed_h is None:
+            # Парсим время через ИИ — он лучше понимает "вечером в 7", "семь часов" и т.п.
+            from grok import ask_grok
+            import json as _json2
+            now_time = datetime.datetime.now(tz=UFA_TZ)
+            time_prompt = (
+                "Пользователь написал время: \"" + text + "\". "
+                "Сейчас " + now_time.strftime("%H:%M") + ". "
+                "Верни только JSON: {\"time\": \"HH:MM\"} — время в 24-часовом формате. "
+                "Если не можешь определить — верни {\"time\": null}. "
+                "Примеры: \"в 7 вечера\" → 19:00, \"семь утра\" → 07:00, \"полдень\" → 12:00, "
+                "\"вечером в 7\" → 19:00, \"три дня\" → 15:00, \"ночью в 2\" → 02:00. "
+                "Только JSON без пояснений."
+            )
+            try:
+                time_result = await ask_grok(time_prompt, system="Отвечай только валидным JSON.")
+                time_result = _re.sub(r'```[a-z]*\n?', '', time_result).strip()
+                time_match = _re.search(r'\{.*\}', time_result, _re.DOTALL)
+                if time_match:
+                    time_data = _json2.loads(time_match.group())
+                    parsed_time = time_data.get("time")
+                    if parsed_time and parsed_time != "null":
+                        draft["time_of_day"] = parsed_time
+                        draft["time_known"] = True
+                    else:
+                        raise ValueError("time is null")
+                else:
+                    raise ValueError("no json")
+            except Exception as te:
+                # Фоллбэк — простой regex
                 m = _re.search(r'(\d{1,2}):(\d{2})', text)
-                if m: parsed_h, parsed_m = int(m.group(1)), int(m.group(2))
-            if parsed_h is None:
-                m = _re.search(r'^\s*(\d{1,2})\s*$', tl)
-                if m: parsed_h = int(m.group(1))
-            if parsed_h is not None and 0 <= parsed_h <= 23:
-                draft["time_of_day"] = f"{parsed_h:02d}:{parsed_m:02d}"
-                draft["time_known"] = True
-            else:
-                dt = await _parse_dt_smart(text)
-                if dt and not (dt.hour == 23 and dt.minute == 59):
-                    draft["time_of_day"] = dt.strftime("%H:%M")
+                if m:
+                    draft["time_of_day"] = f"{int(m.group(1)):02d}:{int(m.group(2)):02d}"
                     draft["time_known"] = True
                 else:
                     await update.message.reply_text(
-                        "❌ Не распознал время. Попробуй: _15:00_, _в 9 утра_, _3 дня_, _вечером в 19_",
+                        "❌ Не распознал время. Напиши например: _19:00_, _7 вечера_, _утром в 9_",
                         parse_mode="Markdown"
                     )
                     context.user_data["_mode"] = "rem_wiz_custom"
@@ -2133,6 +2182,7 @@ async def _handle_reminder_wizard_custom(update, context, field: str, text: str)
             if m:
                 draft["times_count"] = int(m.group(1))
                 draft["times_known"] = True
+                draft["times_confirmed"] = True
             else:
                 await update.message.reply_text("❌ Введи число. Например: _5_", parse_mode="Markdown")
                 context.user_data["_mode"] = "rem_wiz_custom"

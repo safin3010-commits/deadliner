@@ -59,6 +59,26 @@ def _parse_deadline_from_page(html: str) -> datetime.datetime | None:
         if dt:
             return dt
 
+    # "Закрыто с" — тест уже закрыт, это и есть дедлайн
+    blocks3 = re.findall(
+        r'(?:Закрыто с|Closed|Close time)[^<]{0,20}</(?:strong|td|span)>\s*([^<]{5,80})',
+        html, re.IGNORECASE
+    )
+    for block in blocks3:
+        dt = _parse_ru_date(block)
+        if dt:
+            return dt
+
+    # Ещё один формат: просто текст после "Закрыто с:"
+    blocks4 = re.findall(
+        r'Закрыто с[^:]{0,5}:\s*([^<]{5,80})',
+        html, re.IGNORECASE
+    )
+    for block in blocks4:
+        dt = _parse_ru_date(block)
+        if dt:
+            return dt
+
     return None
 
 

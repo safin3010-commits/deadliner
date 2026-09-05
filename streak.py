@@ -111,7 +111,7 @@ def get_weekly_stats() -> dict:
 
     # Считаем выполненные за неделю — упрощённо через общий счётчик done
     # В идеале нужна дата выполнения, но её нет в текущей структуре
-    done_total = len([t for t in tasks if t.get("done")])
+    done_total = len([t for t in tasks if t.get("manually_done")])
 
     data = _load()
     return {

@@ -23,6 +23,13 @@ def get_safari_url() -> str | None:
     try:
         import sys
         if sys.platform == "darwin":
+            # Сначала проверяем запущен ли Chrome — не запускаем его сами
+            check = subprocess.run(
+                ["pgrep", "-x", "Google Chrome"],
+                capture_output=True, text=True, timeout=2
+            )
+            if not check.stdout.strip():
+                return None  # Chrome не запущен — не будим его
             # macOS — через osascript
             result = subprocess.run(
                 ["osascript", "-e", 'tell application "Google Chrome" to return URL of active tab of front window'],
@@ -281,8 +288,11 @@ async def process_quiz(url: str):
             for ans in q["answers"]:
                 lines.append(f"  {ans}")
         msg = "\n".join(lines)
+        if len(msg) > 4000:
+            msg = msg[:3997] + "..."
         print(f"Отправляю вопрос {q['num']}, длина {len(msg)}")
         await send_tg(msg)
+        await asyncio.sleep(0.3)
         print(f"Отправлен вопрос {q['num']}")
 
 

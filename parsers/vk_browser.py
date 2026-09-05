@@ -170,7 +170,7 @@ async def fetch_todays_vk_messages() -> list:
                     async with _httpx.AsyncClient(timeout=10) as _client:
                         await _client.post(
                             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                            json={"chat_id": MY_TELEGRAM_ID, "text": "⚠️ VK: куки протухли — расписание не приходит. Запусти: python3 parsers/vk_browser.py --save-cookies"}
+                            json={"chat_id": MY_TELEGRAM_ID, "text": "⚠️ VK: куки протухли — расписание не приходит. Запусти: venv/bin/python3 -m parsers.vk_browser --save-cookies"}
                         )
                 except Exception as _e:
                     print(f"VK: не удалось отправить уведомление: {_e}")

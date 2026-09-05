@@ -6,6 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import UFA_TZ, PARSE_HOURS, USER_NAME, WEATHER_LAT, WEATHER_LON
 from storage import get_pending_tasks as _get_pending_raw, get_tasks, save_tasks
 
+
 def get_pending_tasks():
     """Задачи без reminder_only — они не должны попадать в брифинги и дедлайны."""
     return [t for t in _get_pending_raw() if t.get('source') != 'reminder_only']
@@ -427,7 +428,12 @@ async def sync_all_tasks(bot=None, chat_id=None):
                     break
             if not found:
                 key = (t.get("title", ""), t.get("course_name", ""))
-                existing_key_pairs = {(e.get("title",""), e.get("course_name","")) for e in existing_tasks}
+                # Ищем совпадение по названию+курсу среди активных (не done) задач
+                existing_key_pairs = {
+                    (e.get("title",""), e.get("course_name",""))
+                    for e in existing_tasks
+                    if not e.get("done")
+                }
                 if key not in existing_key_pairs:
                     existing_tasks.append(t)
                     existing_ids.add(task_id)
@@ -476,6 +482,14 @@ async def sync_all_tasks(bot=None, chat_id=None):
                     except Exception as ex:
                         print(f"sync_all_tasks: не удалось отправить уведомление: {ex}")
 
+        if updated:
+            print(f"Scheduler: обновлено дедлайнов: {updated}")
+
+        save_tasks(existing_tasks)
+        if added:
+            print(f"Scheduler: добавлено {added} новых задач")
+
+        # notified сохраняем ПОСЛЕ save_tasks — чтобы при падении задачи не потерялись
         if notified_changed:
             try:
                 with open(notified_file, "w") as _f:
@@ -483,13 +497,6 @@ async def sync_all_tasks(bot=None, chat_id=None):
                 print(f"sync_all_tasks: сохранено {len(notified)} уведомлённых задач")
             except Exception as e:
                 print(f"sync_all_tasks: ошибка сохранения notified: {e}")
-
-        if updated:
-            print(f"Scheduler: обновлено дедлайнов: {updated}")
-
-        save_tasks(existing_tasks)
-        if added:
-            print(f"Scheduler: добавлено {added} новых задач")
 
     except Exception as e:
         print(f"Scheduler sync error: {e}")
@@ -649,7 +656,7 @@ async def check_grades_and_notify(bot, chat_id: int):
         try:
             if _os2.path.exists("data/startup_grace.json"):
                 _grace = _json2.load(open("data/startup_grace.json"))
-                if _time2.time() - _grace.get("started_at", 0) < 1200:
+                if _time2.time() - _grace.get("started_at", 0) < 120:
                     _in_grace = True
         except Exception:
             pass
@@ -657,11 +664,11 @@ async def check_grades_and_notify(bot, chat_id: int):
         modeus_grades = await _retry(fetch_modeus_grades) or []
         last_seen = None
         for grade in modeus_grades:
-            grade_key = f"modeus_grade:{grade.get('course','')[:30]}:{grade.get('value','')}:{grade.get('lesson_date','')[:10]}:{grade.get('id','')[-8:]}"
+            grade_key = f"modeus_grade:{grade.get('course','')[:30]}:{grade.get('value','')}:{(grade.get('lesson_date') or '')[:10]}:{(grade.get('id') or '')[-8:]}"
             if _is_notification_sent(grade_key):
                 continue
             if _in_grace:
-                _mark_notification_sent(grade_key)
+                # В grace period только обновляем seen — НЕ помечаем как отправленное
                 if "_seen" in grade:
                     last_seen = grade["_seen"]
                 continue
@@ -670,11 +677,8 @@ async def check_grades_and_notify(bot, chat_id: int):
             if sent_ok:
                 _mark_notification_sent(grade_key)
                 if "_seen" in grade:
-                    last_seen = grade["_seen"]
-        # Сохраняем seen только после отправки всех оценок
-        if last_seen is not None:
-            from parsers.modeus_grades import _save_seen
-            _save_seen(last_seen)
+                    from parsers.modeus_grades import _save_seen
+                    _save_seen(grade["_seen"])
 
     except Exception as e:
         print(f"Scheduler grades check error: {e}")
@@ -789,7 +793,8 @@ async def check_user_reminders(bot, chat_id: int):
 
             # П.1 — дедлайн в тексте
             deadline_line = ""
-            if task_obj and task_obj.get("deadline"):
+            _is_daily = r.get("times_left", 0) >= 9000 or task_obj and task_obj.get("source") == "reminder_only"
+            if task_obj and task_obj.get("deadline") and not _is_daily:
                 try:
                     dl = datetime.datetime.fromisoformat(task_obj["deadline"]).astimezone(UFA_TZ)
                     days_left = (dl.date() - now.date()).days
@@ -857,22 +862,33 @@ async def check_user_reminders(bot, chat_id: int):
 
             mark_sent(r["id"])
 
-            # Звук + Mac-уведомление
+            # Звук + Mac-уведомление + Reminders
             try:
                 import os as _os
                 _title = r.get("task_title", "Напоминание")[:50]
                 _os.system(f'afplay /System/Library/Sounds/Funk.aiff &')
                 _os.system("osascript -e 'display notification \"" + _title + "\" with title \"ДедЛайнер\" sound name \"Funk\"'")
+                _safe_title = _title
+                import subprocess as _sp
+                _sp.run(["osascript", "-e", f'tell application "Reminders" to delete (every reminder whose name is "{_safe_title}") '])
+                _sp.run(["osascript", "-e", f'tell application "Reminders" to make new reminder with properties {{name:"{_safe_title}", due date:current date}}'])
             except Exception:
                 pass
 
-            # Если это разовое reminder_only — удаляем задачу из базы после отправки
-            if task_obj and task_obj.get("source") == "reminder_only" and r.get("times_left", 1) <= 1:
-                from storage import get_tasks, save_tasks as _save_tasks
-                _all = get_tasks()
-                _all = [t for t in _all if str(t["id"]) != str(task_id)]
-                _save_tasks(_all)
-                print(f"Reminder: reminder_only задача {task_id} удалена после срабатывания")
+            # Удаляем reminder_only задачу если это было последнее срабатывание
+            # Проверяем times_left ПОСЛЕ mark_sent (уже декрементировано)
+            if task_obj and task_obj.get("source") == "reminder_only":
+                from reminders import get_all_reminders as _get_active
+                still_active = any(
+                    str(rem.get("task_id")) == str(task_id)
+                    for rem in _get_active()
+                )
+                if not still_active:
+                    from storage import get_tasks, save_tasks as _save_tasks
+                    _all = get_tasks()
+                    _all = [t for t in _all if str(t["id"]) != str(task_id)]
+                    _save_tasks(_all)
+                    print(f"Reminder: reminder_only задача {task_id} удалена после последнего срабатывания")
 
     except Exception as e:
         print(f"Scheduler user reminders error: {e}")
@@ -1126,8 +1142,8 @@ async def send_weekly_report(bot, chat_id: int):
     try:
         from grok import ask_grok
         tasks = get_tasks()
-        done = len([t for t in tasks if t.get("done")])
-        pending = len([t for t in tasks if not t.get("done")])
+        done = len([t for t in tasks if t.get("done") and t.get("source") != "reminder_only"])
+        pending = len([t for t in tasks if not t.get("done") and t.get("source") != "reminder_only"])
         pct = int(done / max(done + pending, 1) * 100)
         week_summary = get_stats_summary()
         avg = get_weekly_done_avg()
@@ -1183,7 +1199,162 @@ async def send_weekly_report(bot, chat_id: int):
 # ─── Утренний брифинг 9:00 (новый) ───────────────────────────────────
 
 
+async def _fetch_yandex_weather() -> str:
+    """Погода через Яндекс Погоду — парсим текст страницы."""
+    try:
+        from playwright.async_api import async_playwright
+        from config import COOKIES_MESSENGER_FILE, USER_CITY
+        import json, os, re
+
+        if not os.path.exists(COOKIES_MESSENGER_FILE):
+            return ""
+        with open(COOKIES_MESSENGER_FILE) as f:
+            raw = json.load(f)
+        cookies = raw.get("cookies", raw) if isinstance(raw, dict) else raw
+        if not cookies:
+            return ""
+
+        city = (USER_CITY or "").strip().lower()
+        _city_map = {
+            "тюмень": "tyumen", "москва": "moscow", "санкт-петербург": "saint-petersburg",
+            "екатеринбург": "yekaterinburg", "уфа": "ufa", "новосибирск": "novosibirsk",
+            "казань": "kazan", "челябинск": "chelyabinsk", "омск": "omsk",
+        }
+        city_en = _city_map.get(city, city or "tyumen")
+        url = f"https://yandex.ru/pogoda/ru/{city_en}"
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            await context.add_cookies(cookies)
+            page = await context.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            await page.wait_for_timeout(4000)
+            text = await page.inner_text("body")
+            await browser.close()
+
+        page_lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+        # Строка 35 (индекс 34): "Уфа, погода сейчас: облачно с прояснениями..."
+        # Строка 38: температура (просто "+30°")
+        # Строка 39: "Ощущается как +23°"
+        # Строка 46: "4,4 м/с, З"
+        # Строки 237-240: утром/днём/вечером/ночью
+
+        now_desc = ""
+        now_temp = ""
+        feels = ""
+        wind = ""
+        morning_t = ""; morning_f = ""; morning_w = ""; morning_d = ""
+        day_t = ""; day_f = ""; day_w = ""; day_d = ""
+        evening_t = ""; evening_f = ""; evening_w = ""; evening_d = ""
+        night_t = ""; night_f = ""; night_w = ""; night_d = ""
+
+        for i, l in enumerate(page_lines):
+            if "погода сейчас:" in l.lower() and not now_desc:
+                m = re.search(r"погода сейчас:\s*(.+?)(?:\.|$)", l, re.IGNORECASE)
+                if m:
+                    now_desc = m.group(1).strip().rstrip(".")
+            if re.match(r"^[+\-−]?\d+°$", l) and not now_temp:
+                now_temp = l.replace("−", "-")
+            if l.startswith("Ощущается как") and not feels:
+                feels = l.replace("Ощущается как ", "").strip()
+            if re.match(r"^\d", l) and "м/с" in l and not wind:
+                wind = l
+            # Прогноз по частям дня: "утром температура воздуха +20°, ощущается как +16°, облачно, скорость ветра 6 м/с, южный"
+            _part_re = r"([+\-−]?\d+°)[^,]*, ощущается как ([+\-−]?\d+°), ([^,]+), скорость ветра ([\d,.]+)\s*м/с,?\s*([^,]*)"
+            if l.startswith("утром температура") and not morning_t:
+                m = re.search(_part_re, l)
+                if m:
+                    morning_t, morning_f, morning_d = m.group(1), m.group(2), m.group(3)
+                    morning_w = f"{m.group(4)} м/с {m.group(5)}".strip().rstrip(",")
+            if l.startswith("днём ") and not day_t:
+                m = re.search(_part_re, l)
+                if m:
+                    day_t, day_f, day_d = m.group(1), m.group(2), m.group(3)
+                    day_w = f"{m.group(4)} м/с {m.group(5)}".strip().rstrip(",")
+            if l.startswith("вечером ") and not evening_t:
+                m = re.search(_part_re, l)
+                if m:
+                    evening_t, evening_f, evening_d = m.group(1), m.group(2), m.group(3)
+                    evening_w = f"{m.group(4)} м/с {m.group(5)}".strip().rstrip(",")
+            if l.startswith("ночью ") and not night_t:
+                m = re.search(_part_re, l)
+                if m:
+                    night_t, night_f, night_d = m.group(1), m.group(2), m.group(3)
+                    night_w = f"{m.group(4)} м/с {m.group(5)}".strip().rstrip(",")
+
+        if not now_temp and not morning_t:
+            return ""
+
+        def _part_line(icon, label, t, f, w, d):
+            if not t:
+                return ""
+            parts = [f"{icon} *{label}:* {t}"]
+            if f and f != t:
+                parts.append(f"ощущ. {f}")
+            if d:
+                parts.append(d)
+            if w:
+                parts.append(f"💨 {w}")
+            return ", ".join(parts) if len(parts) > 1 else parts[0]
+
+        out = []
+        # Текущая погода
+        if now_temp:
+            feels_str = f", ощущ. {feels}" if feels and feels != now_temp else ""
+            wind_str = f", 💨 {wind}" if wind else ""
+            desc_str = f" — {now_desc}" if now_desc else ""
+            out.append(f"🌡 *Сейчас {now_temp}*{feels_str}{desc_str}{wind_str}")
+            out.append("─────────────────────")
+
+        # Прогноз по частям дня
+        for line in [
+            _part_line("🌅", "Утром",   morning_t, morning_f, morning_w, morning_d),
+            _part_line("☀️",  "Днём",    day_t,     day_f,     day_w,     day_d),
+            _part_line("🌆", "Вечером", evening_t, evening_f, evening_w, evening_d),
+            _part_line("🌙", "Ночью",   night_t,   night_f,   night_w,   night_d),
+        ]:
+            if line:
+                out.append(line)
+
+        result = "\n".join(out)
+        print(f"Yandex weather OK: {result[:80]}")
+        return result
+        print(f"Yandex weather OK: {result[:80]}")
+        return result
+
+    except Exception as e:
+        print(f"Yandex weather error: {e}")
+        import traceback; traceback.print_exc()
+        return ""
+
+
 async def _fetch_weather() -> str:
+    """Погода — сначала Яндекс (2 попытки), fallback на Open-Meteo."""
+    for attempt in range(2):
+        try:
+            ya = await _fetch_yandex_weather()
+            if ya:
+                return ya
+        except Exception as e:
+            print(f"_fetch_weather: попытка {attempt+1} упала: {e}")
+        if attempt == 0:
+            await asyncio.sleep(3)
+    # Fallback
+    try:
+        om = await _fetch_weather_openmeteo()
+        if om:
+            print("Weather: используем Open-Meteo fallback")
+            return om
+    except Exception as e:
+        print(f"_fetch_weather fallback error: {e}")
+    return ""
+
+
+async def _fetch_weather_openmeteo() -> str:
     """Погода через Open-Meteo (без ключа)."""
     try:
         import httpx
@@ -1548,7 +1719,7 @@ async def send_evening_briefing(bot, chat_id: int):
 
         # Все задачи
         all_tasks = get_tasks()
-        pending = [t for t in all_tasks if not t.get("done")]
+        pending = [t for t in all_tasks if not t.get("done") and t.get("source") != "reminder_only"]
 
         # Выполненные сегодня
         done_today = []
@@ -2229,6 +2400,7 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
 
     # ── Фоновые джобы ──
     scheduler.add_job(check_grades_and_notify, trigger="interval", minutes=10,
+                      start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=3),
                       args=[bot, chat_id], id="grades_check")
     scheduler.add_job(check_lms_grades_and_notify, trigger="interval", minutes=15,
                       start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=2),

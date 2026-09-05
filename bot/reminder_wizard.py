@@ -43,15 +43,22 @@ async def parse_reminder_intent(text: str, now: datetime.datetime) -> dict:
         "- interval_known: true только если интервал ЯВНО указан\n"
         "- times_count: количество повторов или null\n"
         "- times_known: true только если количество ЯВНО указано\n"
-        "- is_recurring: true ТОЛЬКО если есть каждые/каждый/раз в. НЕ ставь для через X\n"
+        "- is_recurring: true если есть каждые/каждый/раз в/несколько раз/пару раз/много раз/периодически. НЕ ставь для через X\n"
+        "- times_count: если сказано несколько=3, пару=2, много=5, пару раз=2, несколько раз=3\n"
         "- raw_type: reminder | task | ambiguous\n\n"
         "КРИТИЧЕСКИ ВАЖНО:\n"
         "\"через 2 часа\" = однократно, is_recurring=false, interval_minutes=null\n"
         "\"каждые 2 часа\" = повтор, is_recurring=true, interval_minutes=120\n"
         "\"каждый день в 9\" = interval_minutes=1440, time_of_day=09:00, is_recurring=true\n"
+        "\"несколько раз\" = is_recurring=true, times_count=3, times_known=true\n"
+        "\"пару раз\" = is_recurring=true, times_count=2, times_known=true\n"
+        "\"много раз\" = is_recurring=true, times_count=5, times_known=true\n"
+        "\"периодически\" = is_recurring=true, times_count=3, times_known=true\n"
         "\"завтра или послезавтра\" = date_ambiguous=true, date_options=[\"" + day1 + "\",\"" + day2 + "\"]\n\n"
         "ПРИМЕРЫ:\n"
         "\"напомни выпить таблетку через 2 часа\" -> is_recurring=false, interval_minutes=null\n"
+        "\"напомни завтра забрать диск несколько раз\" -> is_recurring=true, times_count=3, times_known=true, interval_known=false\n"
+        "\"напомни пару раз купить билеты\" -> is_recurring=true, times_count=2, times_known=true, interval_known=false\n"
         "\"каждые 30 минут 5 раз пить воду с 10 утра\" -> interval_minutes=30, interval_known=true, times_count=5, times_known=true, is_recurring=true\n"
         "\"каждый день в 9 утра делать зарядку\" -> interval_minutes=1440, interval_known=true, time_of_day=09:00, is_recurring=true\n"
         "\"напомни завтра или послезавтра позвонить врачу\" -> date_ambiguous=true, date_options=[\"" + day1 + "\",\"" + day2 + "\"]\n"
@@ -102,7 +109,14 @@ def get_missing_field(draft: dict):
         draft["is_recurring"] = True
     if draft.get("is_recurring") and not draft.get("interval_known"):
         return "interval_minutes"
-    if draft.get("interval_minutes") and not draft.get("times_known"):
+    # Всегда спрашиваем интервал если не указан
+    if not draft.get("interval_known"):
+        return "interval_minutes"
+    # Ежедневный режим: спрашиваем сколько раз в день
+    if draft.get("daily_mode") and not draft.get("daily_times_confirmed"):
+        return "daily_times"
+    # Всегда спрашиваем количество раз (кроме ежедневного — там уже посчитано)
+    if not draft.get("times_confirmed") and not draft.get("daily_mode"):
         return "times_count"
     return None
 
@@ -155,7 +169,8 @@ async def ask_date(message, draft: dict):
     d2 = (now + datetime.timedelta(days=2)).strftime("%d.%m.%Y")
     buttons = [
         [("Сегодня", "rem_wiz:date:" + d0), ("Завтра", "rem_wiz:date:" + d1), ("Послезавтра", "rem_wiz:date:" + d2)],
-        [("✍️ Другая дата", "rem_wiz:date:custom"), ("❌ Отмена", "rem_wiz:cancel")],
+        [("🔄 Каждый день", "rem_wiz:date:daily"), ("✍️ Другая дата", "rem_wiz:date:custom")],
+        [("❌ Отмена", "rem_wiz:cancel")],
     ]
     return await message.reply_text(text, reply_markup=_make_keyboard(buttons), parse_mode="Markdown")
 
@@ -180,6 +195,39 @@ async def ask_interval(message, draft: dict):
     return await message.reply_text(text, reply_markup=_make_keyboard(buttons), parse_mode="Markdown")
 
 
+async def ask_daily_times(message, draft: dict):
+    """Спрашиваем сколько раз в день для ежедневного режима."""
+    existing_interval = draft.get("interval_minutes")
+    if existing_interval and existing_interval > 0:
+        # Интервал уже известен — показываем его и спрашиваем подтверждение
+        if existing_interval < 60:
+            ivl_str = f"каждые {existing_interval} мин"
+        elif existing_interval == 60:
+            ivl_str = "каждый час"
+        else:
+            ivl_str = f"каждые {existing_interval//60} ч"
+        # Считаем сколько раз в день при этом интервале (с 9 до 23 = 840 мин)
+        times_auto = max(1, 840 // existing_interval)
+        text = (draft_summary(draft) +
+                f"\n\n🔄 Интервал: *{ivl_str}*\n"
+                f"С 9:00 до 23:00 это примерно *{times_auto} раз в день*\n\n"
+                f"Подтвердить или выбрать другое количество?")
+        buttons = [
+            [("✅ " + str(times_auto) + " раз в день", f"rem_wiz:daily_times:{times_auto}")],
+            [("2 раза", "rem_wiz:daily_times:2"), ("3 раза", "rem_wiz:daily_times:3"), ("4 раза", "rem_wiz:daily_times:4")],
+            [("6 раз", "rem_wiz:daily_times:6"), ("8 раз", "rem_wiz:daily_times:8"), ("10 раз", "rem_wiz:daily_times:10")],
+            [("❌ Отмена", "rem_wiz:cancel")],
+        ]
+    else:
+        text = draft_summary(draft) + "\n\n🔄 Сколько раз в день напоминать?\n_Интервал рассчитается автоматически (с 9:00 до 23:00)_"
+        buttons = [
+            [("1 раз", "rem_wiz:daily_times:1"), ("2 раза", "rem_wiz:daily_times:2"), ("3 раза", "rem_wiz:daily_times:3")],
+            [("4 раза", "rem_wiz:daily_times:4"), ("6 раз", "rem_wiz:daily_times:6"), ("8 раз", "rem_wiz:daily_times:8")],
+            [("❌ Отмена", "rem_wiz:cancel")],
+        ]
+    return await message.reply_text(text, reply_markup=_make_keyboard(buttons), parse_mode="Markdown")
+
+
 async def ask_times_count(message, draft: dict):
     text = draft_summary(draft) + "\n\n🔁 Сколько раз напомнить?"
     buttons = [
@@ -201,7 +249,10 @@ async def show_confirmation(message, draft: dict):
         time_fmt = "?"
     if interval and interval > 0:
         s = ("каждые " + str(interval) + " мин") if interval < 60 else ("каждый час" if interval == 60 else ("каждые " + str(interval//60) + " ч"))
-        repeat_str = s + ", " + str(times) + " раз"
+        if times >= 9999:
+            repeat_str = s + ", каждый день"
+        else:
+            repeat_str = s + ", " + str(times) + " раз"
     else:
         repeat_str = "однократно"
     text = (
@@ -227,6 +278,8 @@ async def ask_next_question(message, draft: dict, context=None):
         sent = await ask_time(message, draft)
     elif missing == "interval_minutes":
         sent = await ask_interval(message, draft)
+    elif missing == "daily_times":
+        sent = await ask_daily_times(message, draft)
     elif missing == "times_count":
         sent = await ask_times_count(message, draft)
     else:

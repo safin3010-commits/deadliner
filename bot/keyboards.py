@@ -245,7 +245,7 @@ def active_reminders_keyboard(reminders_list: list) -> InlineKeyboardMarkup:
                 when = next_at.strftime("%d.%m %H:%M")
         except Exception:
             when = "—"
-        repeat = f" ×{times}" if times > 1 else ""
+        repeat = " ×каждый день" if times >= 9999 else (f" ×{times}" if times > 1 else "")
         label = f"⏰ {title} — {when}{repeat}  🗑"
         keyboard.append([InlineKeyboardButton(label, callback_data=f"remind_del:{r['id']}")])
     keyboard.append([InlineKeyboardButton("✖️ Закрыть", callback_data="cancel")])
