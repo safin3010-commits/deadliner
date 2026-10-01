@@ -4,9 +4,43 @@ import hashlib
 import datetime
 import re
 from config import COOKIES_MESSENGER_FILE, UFA_TZ
-from storage import is_seen, add_seen_message
+from storage import is_seen
 
-MESSENGER_URL = "https://messenger.360.yandex.ru"
+MESSENGER_URL = "https://telemost.360.yandex.ru"  # messenger.360.yandex.ru переехал на Телемост (24.09.2026): старый адрес теперь просто промо-заглушка без списка чатов
+
+_SESSION_ALERT_FILE = "data/messenger_session_alert.json"
+
+
+async def _alert_session_expired():
+    """Раньше протухшая сессия просто печаталась в лог и мониторинг мессенджера
+    молча умирал навсегда — пользователь не получал ни одного сигнала. Шлём
+    предупреждение в Telegram, но не чаще раза в час (job идёт каждые 5 минут)."""
+    import os
+    try:
+        if os.path.exists(_SESSION_ALERT_FILE):
+            with open(_SESSION_ALERT_FILE) as f:
+                last = json.load(f).get("at", 0)
+            if datetime.datetime.now(tz=UFA_TZ).timestamp() - last < 3600:
+                return
+    except Exception:
+        pass
+    try:
+        from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=10) as _client:
+            await _client.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                json={
+                    "chat_id": MY_TELEGRAM_ID,
+                    "text": "⚠️ Яндекс Мессенджер: сессия истекла — сообщения не приходят. "
+                            "Запусти: python3 login_messenger.py",
+                },
+            )
+        os.makedirs("data", exist_ok=True)
+        with open(_SESSION_ALERT_FILE, "w") as f:
+            json.dump({"at": datetime.datetime.now(tz=UFA_TZ).timestamp()}, f)
+    except Exception as e:
+        print(f"Messenger: не удалось отправить уведомление об истёкшей сессии: {e!r}")
 
 # ─── Точные селекторы из реального HTML ───────────────────────────────
 CHAT_ITEM_SEL     = "[class*='yamb-chat-list-item__content']"
@@ -54,10 +88,6 @@ def save_cookies(cookies: list) -> None:
     existing = _load_raw()
     with open(COOKIES_MESSENGER_FILE, "w") as f:
         json.dump({"url": existing.get("url", MESSENGER_URL), "cookies": cookies}, f, indent=2)
-
-
-def cookies_exist() -> bool:
-    return bool(load_cookies())
 
 
 # ─── Утилиты ──────────────────────────────────────────────────────────
@@ -189,8 +219,10 @@ async def _parse_chat_list(page) -> list[dict]:
 
 # ─── Чтение сообщений внутри чата ─────────────────────────────────────
 
-async def _read_open_chat(page, chat_name: str) -> list[dict]:
-    """Читаем последние новые сообщения из открытого чата."""
+async def _read_open_chat(page, chat_name: str, limit: int = 5) -> list[dict]:
+    """Читаем последние новые сообщения из открытого чата.
+    limit — сколько последних сообщений забрать (обычная проверка — 5
+    последних; ночной полный обход дня — больше, см. fetch_full_day_sweep)."""
     await page.wait_for_timeout(2_000)
     messages = []
 
@@ -198,7 +230,7 @@ async def _read_open_chat(page, chat_name: str) -> list[dict]:
     for sel in MSG_SELS:
         found = await page.query_selector_all(sel)
         if found:
-            msg_els = found[-5:]
+            msg_els = found[-limit:]
             print(f"    сообщения по '{sel}' ({len(found)}), читаем {len(msg_els)}")
             break
 
@@ -222,7 +254,7 @@ async def _read_open_chat(page, chat_name: str) -> list[dict]:
                     except Exception:
                         continue
                 if candidates:
-                    msg_els = candidates[-5:]
+                    msg_els = candidates[-limit:]
                     break
 
     for el in msg_els:
@@ -236,7 +268,7 @@ async def _read_open_chat(page, chat_name: str) -> list[dict]:
             messages.append({
                 "id": msg_id,
                 "sender": chat_name,
-                "text": text[:600],
+                "text": text,
                 "source": "messenger",
             })
         except Exception:
@@ -258,7 +290,7 @@ async def _fetch_from_page(context) -> list[dict]:
             loaded = True
             break
         except Exception as e:
-            print(f"  Messenger: попытка {attempt+1} не удалась: {e}")
+            print(f"  Messenger: попытка {attempt+1} не удалась: {e!r}")
             await page.wait_for_timeout(3_000)
     if not loaded:
         print("  Messenger: страница не загрузилась после 3 попыток")
@@ -352,6 +384,7 @@ async def fetch_new_messages() -> list:
                 print("Messenger: сессия истекла. Запусти: python3 login_messenger.py")
                 await check.close()
                 await browser.close()
+                await _alert_session_expired()
                 return []
             await check.close()
 
@@ -362,7 +395,131 @@ async def fetch_new_messages() -> list:
         return messages
 
     except Exception as e:
-        print(f"Messenger fetch failed: {e}")
+        print(f"Messenger fetch failed: {e!r}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+async def _fetch_full_day_from_page(context) -> list[dict]:
+    page = await context.new_page()
+
+    print("  Messenger: (ночной обход) загружаем страницу...")
+    loaded = False
+    for attempt in range(3):
+        try:
+            await page.goto(MESSENGER_URL, wait_until="domcontentloaded", timeout=40_000)
+            loaded = True
+            break
+        except Exception as e:
+            print(f"  Messenger: попытка {attempt+1} не удалась: {e!r}")
+            await page.wait_for_timeout(3_000)
+    if not loaded:
+        print("  Messenger: страница не загрузилась после 3 попыток")
+        await page.close()
+        return []
+    await page.wait_for_timeout(5_000)
+
+    await _close_popups(page)
+    await page.wait_for_timeout(1_000)
+
+    now = datetime.datetime.now(tz=UFA_TZ)
+    all_messages = []
+    seen_ids: set[str] = set()
+
+    chats = await _parse_chat_list(page)
+    print(f"  Messenger: ночной обход — читаем все {len(chats)} чат(ов) целиком")
+
+    for chat in chats:
+        try:
+            await chat["el"].click()
+            full_msgs = await _read_open_chat(page, chat["name"], limit=40)
+        except Exception as e:
+            print(f"  Messenger: не удалось открыть чат '{chat['name']}' при ночном обходе: {e!r}")
+            continue
+        for m in full_msgs:
+            if m["id"] in seen_ids:
+                continue
+            seen_ids.add(m["id"])
+            m["date"] = now.strftime("%d.%m.%Y %H:%M")
+            all_messages.append(m)
+            print(f"  Messenger: (ночной обход) от '{chat['name']}': {m['text'][:50]}")
+
+    save_cookies(await context.cookies())
+    await page.close()
+
+    return all_messages
+
+
+async def fetch_full_day_sweep() -> list:
+    """
+    Раз в сутки (в полночь) читаем ВСЕ чаты целиком — и прочитанные, и ещё
+    непрочитанные. В отличие от fetch_new_messages() (только preview
+    непрочитанных, без захода внутрь чата) — здесь мы открываем каждый чат,
+    поэтому это может пометить у отправителя ещё непрочитанные сообщения как
+    прочитанные. Это осознанный компромисс (принят пользователем) ради
+    полного контекста для наставника — домашки, важные детали по учёбе и
+    т.п., которые не видно по одному превью.
+    Дубли отсеиваются через is_seen(): старое уже залогированное сообщение
+    просто пропускается, не перечитывается заново — новый охват затрагивает
+    только то, что реально добавилось со вчерашнего обхода.
+    Ничего не отправляет в Telegram напрямую — вызывающий код (scheduler.py)
+    сам решает, что делать с результатом (здесь — только лог для наставника).
+    """
+    print("Messenger: ночной полный обход всех чатов...")
+
+    cookies = load_cookies()
+    if not cookies:
+        print("Messenger: нет cookies. Запусти: python3 login_messenger.py")
+        return []
+
+    try:
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            )
+            await context.add_cookies(cookies)
+
+            check = await context.new_page()
+            loaded = False
+            for attempt in range(3):
+                try:
+                    await check.goto(MESSENGER_URL, wait_until="domcontentloaded", timeout=40_000)
+                    loaded = True
+                    break
+                except Exception:
+                    await check.wait_for_timeout(2_000)
+            if not loaded:
+                print("Messenger: сессия недоступна (сеть)")
+                await check.close()
+                await browser.close()
+                return []
+            if any(x in check.url for x in ("passport", "login", "auth")):
+                print("Messenger: сессия истекла. Запусти: python3 login_messenger.py")
+                await check.close()
+                await browser.close()
+                await _alert_session_expired()
+                return []
+            await check.close()
+
+            messages = await _fetch_full_day_from_page(context)
+            await browser.close()
+
+        print(f"Messenger: ночной обход — итого новых сообщений: {len(messages)}")
+        return messages
+
+    except Exception as e:
+        print(f"Messenger full day sweep failed: {e!r}")
         import traceback
         traceback.print_exc()
         return []

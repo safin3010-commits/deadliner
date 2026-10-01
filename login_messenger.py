@@ -8,7 +8,7 @@ import json
 import os
 
 COOKIES_FILE  = "data/cookies_messenger.json"
-MESSENGER_URL = "https://messenger.360.yandex.ru"
+MESSENGER_URL = "https://telemost.360.yandex.ru"  # messenger.360.yandex.ru переехал на Телемост (24.09.2026)
 
 
 async def main():

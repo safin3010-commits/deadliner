@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Шаблон. Установка:
+     sed "s#__PROJECT_DIR__#$PWD#g" scripts/native_widget/com.ilnursafin.mentorwidget.plist \
+       > ~/Library/LaunchAgents/com.ilnursafin.mentorwidget.plist
+     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ilnursafin.mentorwidget.plist -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ilnursafin.mentorwidget</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PROJECT_DIR__/scripts/native_widget/MentorWidget</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Перезапуск только при падении: второй экземпляр выходит с кодом 0
+         (flock в main.swift) и launchd его не перезапускает. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_DIR__/data/mentor_widget_stderr.log</string>
+</dict>
+</plist>

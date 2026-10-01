@@ -13,6 +13,7 @@ import json
 import os
 import datetime
 import httpx
+from parsers.direct_net import direct_async_client
 from config import UFA_TZ
 
 SEEN_FILE = "data/seen_modeus_grades.json"
@@ -55,7 +56,7 @@ async def _get_student_info(jwt_token: str, person_id: str) -> dict | None:
         "Content-Type": "application/json",
     }
     try:
-        async with httpx.AsyncClient(base_url=BASE_URL, timeout=30, http2=True) as client:
+        async with direct_async_client(base_url=BASE_URL, timeout=30, http2=True) as client:
             r = await client.get(f"{STUDENTS_API}/primary", headers=headers)
             if r.status_code != 200:
                 print(f"Modeus grades: /primary → {r.status_code}")
@@ -102,7 +103,7 @@ async def _get_student_info(jwt_token: str, person_id: str) -> dict | None:
                 "person_id": person_id,
             }
     except Exception as e:
-        print(f"Modeus grades: ошибка student info: {e}")
+        print(f"Modeus grades: ошибка student info: {e!r}")
         return None
 
 
@@ -123,7 +124,7 @@ async def _fetch_tables(jwt_token: str, info: dict) -> tuple | None:
     }
 
     try:
-        async with httpx.AsyncClient(base_url=BASE_URL, timeout=30, http2=True) as client:
+        async with direct_async_client(base_url=BASE_URL, timeout=30, http2=True) as client:
             r1 = await client.post(
                 f"{STUDENTS_API}/academic-period-results-table/primary",
                 json=primary_body, headers=headers
@@ -149,7 +150,7 @@ async def _fetch_tables(jwt_token: str, info: dict) -> tuple | None:
             return primary, r2.json()
 
     except Exception as e:
-        print(f"Modeus grades: ошибка запроса таблиц: {e}")
+        print(f"Modeus grades: ошибка запроса таблиц: {e!r}")
         return None
 
 
@@ -486,7 +487,7 @@ async def fetch_modeus_grades() -> list[dict]:
         return new_grades
 
     except Exception as e:
-        print(f"Modeus grades fetch failed: {e}")
+        print(f"Modeus grades fetch failed: {e!r}")
         import traceback
         traceback.print_exc()
         return []
@@ -577,7 +578,7 @@ async def fetch_grades_for_subject(cur_id: str) -> dict | None:
             "remaining_lessons": remaining if total_lessons_count > 0 else None,
         }
     except Exception as e:
-        print(f"fetch_grades_for_subject error: {e}")
+        print(f"fetch_grades_for_subject error: {e!r}")
         return None
 
 
@@ -609,5 +610,5 @@ async def fetch_all_subjects() -> list[dict]:
             })
         return subjects
     except Exception as e:
-        print(f"fetch_all_subjects error: {e}")
+        print(f"fetch_all_subjects error: {e!r}")
         return []

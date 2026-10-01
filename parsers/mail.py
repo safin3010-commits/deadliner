@@ -4,12 +4,21 @@ import email.header
 import email.utils
 import datetime
 import re
+import ssl
+import time
 from html.parser import HTMLParser
-from config import YANDEX_MAIL, YANDEX_APP_PASSWORD, UFA_TZ
-from storage import is_seen, add_seen_message
+from config import YANDEX_MAIL, YANDEX_APP_PASSWORD, GMAIL_ADDRESS, GMAIL_APP_PASSWORD, UFA_TZ
+from storage import is_seen
 
 IMAP_HOST = "imap.yandex.ru"
+GMAIL_IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
+# Яндекс иногда рвёт TLS-соединение на середине (SSLEOFError) — примерно в
+# 1 из 9 проверок по логам, чисто сетевой обрыв, не проблема аккаунта или
+# кода. Раньше это тихо гасило всю проверку до следующего 15-минутного
+# тика; теперь один быстрый повтор той же попытки.
+MAIL_CONNECT_RETRIES = 2
+MAIL_RETRY_DELAY_SEC = 3
 
 
 def decode_header_value(value: str) -> str:
@@ -92,16 +101,6 @@ def html_to_text(html: str) -> str:
         return re.sub(r"<[^>]+>", " ", html).strip()
 
 
-def _escape_html(text: str) -> str:
-    """Экранируем спецсимволы для Telegram HTML parse_mode."""
-    return (
-        text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
-
-
 def get_email_body(msg) -> str:
     """Извлекаем текст письма, конвертируя HTML в читаемый вид."""
     text_plain = ""
@@ -146,33 +145,47 @@ def get_email_body(msg) -> str:
     else:
         body = ""
 
-    # Обрезаем до разумного размера
-    if len(body) > 600:
-        body = body[:600] + "\n…"
-
     return body.strip()
 
 
-def _fetch_new_emails_sync() -> list:
-    print("Mail: проверяем почту...")
-    new_emails = []
+def _fetch_new_emails_sync(host: str, user: str, password: str, id_prefix: str, label: str, source: str,
+                            from_filter: str = None) -> list:
+    print(f"Mail ({label}): проверяем почту...")
 
     mail = None
-    try:
-        mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
-        mail.login(YANDEX_MAIL, YANDEX_APP_PASSWORD)
-        mail.select("INBOX")
+    for attempt in range(1, MAIL_CONNECT_RETRIES + 1):
+        try:
+            mail = imaplib.IMAP4_SSL(host, IMAP_PORT, timeout=30)
+            mail.login(user, password)
+            mail.select("INBOX")
+            break
+        except (OSError, ssl.SSLError) as e:
+            # Обрыв соединения/TLS — сетевая ошибка, не ошибка логина.
+            # imaplib.IMAP4.error (например неверный пароль) сюда не попадает
+            # и уходит в обработчик ниже без повтора.
+            mail = None
+            if attempt >= MAIL_CONNECT_RETRIES:
+                print(f"Mail ({label}): не удалось подключиться после {attempt} попыток: {e!r}")
+                return []
+            print(f"Mail ({label}): обрыв соединения ({e!r}), повтор через {MAIL_RETRY_DELAY_SEC}с...")
+            time.sleep(MAIL_RETRY_DELAY_SEC)
 
-        status, message_ids = mail.uid("search", None, "UNSEEN")
+    new_emails = []
+    try:
+        if from_filter:
+            status, message_ids = mail.uid("search", None, "FROM", from_filter, "UNSEEN")
+        else:
+            status, message_ids = mail.uid("search", None, "UNSEEN")
         if status != "OK":
             return []
 
         ids = message_ids[0].split()
-        print(f"Mail: найдено непрочитанных писем: {len(ids)}")
+        print(f"Mail ({label}): найдено непрочитанных писем: {len(ids)}")
 
         for msg_id in ids:
             msg_id_str = msg_id.decode()
-            if is_seen(f"mail_{msg_id_str}"):
+            seen_id = f"{id_prefix}{msg_id_str}"
+            if is_seen(seen_id):
                 continue
 
             status, data = mail.uid("fetch", msg_id, "(BODY.PEEK[])")
@@ -200,22 +213,22 @@ def _fetch_new_emails_sync() -> list:
             body = get_email_body(msg)
 
             new_emails.append({
-                "id": f"mail_{msg_id_str}",
+                "id": seen_id,
                 "subject": subject,
                 "sender": sender_clean,
                 "date": date_formatted,
                 "body": body,
-                "source": "mail",
+                "source": source,
             })
 
             # add_seen_message вызывается после успешной отправки в scheduler
             pass
 
-        print(f"Mail: новых писем: {len(new_emails)}")
+        print(f"Mail ({label}): новых писем: {len(new_emails)}")
         return new_emails
 
     except imaplib.IMAP4.error as e:
-        print(f"Mail IMAP error: {e}")
+        print(f"Mail ({label}) IMAP error: {e!r}")
         return []
     finally:
         if mail is not None:
@@ -229,10 +242,37 @@ def _fetch_new_emails_sync() -> list:
 
 
 async def fetch_new_emails() -> list:
-    """Async обёртка — запускаем синхронный IMAP в отдельном потоке."""
+    """Async обёртка — запускаем синхронный IMAP (Яндекс) в отдельном потоке."""
     import asyncio as _asyncio
     try:
-        return await _asyncio.to_thread(_fetch_new_emails_sync)
+        return await _asyncio.to_thread(
+            _fetch_new_emails_sync, IMAP_HOST, YANDEX_MAIL, YANDEX_APP_PASSWORD, "mail_", "Яндекс", "mail"
+        )
     except Exception as e:
-        print(f"Mail fetch failed: {e}")
+        print(f"Mail fetch failed: {e!r}")
+        return []
+
+
+# Gmail-ящик пользователя завален посторонней почтой (десятки тысяч
+# писем) — учебные приходят только от Нетологии, поэтому фильтруем
+# по отправителю прямо на уровне IMAP SEARCH (дёшево), а не постфактум.
+GMAIL_FROM_FILTER = "netology.ru"
+
+
+async def fetch_new_gmail_emails() -> list:
+    """То же самое для Gmail — тот же IMAP-механизм через app password
+    (Google требует включённую 2FA для генерации app password, обычный
+    пароль от аккаунта тут не сработает: myaccount.google.com/apppasswords).
+    Смотрим только письма от Нетологии (GMAIL_FROM_FILTER) — остальной
+    инбокс боту не нужен и не подходит для автоматического анализа."""
+    import asyncio as _asyncio
+    if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
+        return []
+    try:
+        return await _asyncio.to_thread(
+            _fetch_new_emails_sync, GMAIL_IMAP_HOST, GMAIL_ADDRESS, GMAIL_APP_PASSWORD, "gmail_", "Gmail", "gmail",
+            GMAIL_FROM_FILTER,
+        )
+    except Exception as e:
+        print(f"Gmail fetch failed: {e!r}")
         return []

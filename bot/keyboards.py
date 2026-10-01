@@ -9,10 +9,11 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
-def tasks_filter_keyboard() -> InlineKeyboardMarkup:
-    keyboard = [[
-        InlineKeyboardButton("🔴 Срочные", callback_data="tasks:urgent"),
-    ]]
+def pending_text_choice_keyboard(token: str) -> InlineKeyboardMarkup:
+    keyboard = [
+        [InlineKeyboardButton("📝 Задача / напоминание", callback_data=f"pending_task:{token}")],
+        [InlineKeyboardButton("💬 Вопрос", callback_data=f"pending_question:{token}")],
+    ]
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -245,7 +246,9 @@ def active_reminders_keyboard(reminders_list: list) -> InlineKeyboardMarkup:
                 when = next_at.strftime("%d.%m %H:%M")
         except Exception:
             when = "—"
-        repeat = " ×каждый день" if times >= 9999 else (f" ×{times}" if times > 1 else "")
+        if times <= 0:
+            when = "отработало"
+        repeat = " бессрочно" if times >= 9999 else (f" ×{times}" if times > 1 else "")
         label = f"⏰ {title} — {when}{repeat}  🗑"
         keyboard.append([InlineKeyboardButton(label, callback_data=f"remind_del:{r['id']}")])
     keyboard.append([InlineKeyboardButton("✖️ Закрыть", callback_data="cancel")])

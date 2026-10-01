@@ -24,6 +24,11 @@ NETOLOGY_PASSWORD = os.getenv("NETOLOGY_PASSWORD")
 YANDEX_MAIL = os.getenv("YANDEX_MAIL")
 YANDEX_APP_PASSWORD = os.getenv("YANDEX_APP_PASSWORD")
 
+# Gmail (второй почтовый ящик, тоже через IMAP app password —
+# myaccount.google.com/apppasswords, требует включённой 2FA)
+GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+
 # Timezone
 UFA_TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Yekaterinburg"))
 
@@ -72,6 +77,8 @@ WEATHER_LON = float(_lon) if _lon else 37.6173
 
 # ВКонтакте
 VK_CHAT_URL = os.getenv("VK_CHAT_URL", "")
+# VK_CHAT_URL может содержать несколько ссылок через запятую — мониторим все
+VK_CHAT_URLS = [u.strip() for u in VK_CHAT_URL.split(",") if u.strip()]
 VK_PROXY = os.getenv("VK_PROXY", "")
 
 # Chrome path — платформо-зависимый дефолт

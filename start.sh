@@ -17,6 +17,16 @@ echo "Старые процессы убиты"
 # Убиваем все оставшиеся экземпляры на всякий случай
 pkill -f "main\.py" 2>/dev/null; sleep 1
 
+# Ротация bot.log — раньше рос бесконечно (доходил до 38+ МБ), ротируем
+# при превышении ~15 МБ. error_watchdog.py сам переживает обрезку файла
+# (сверяет offset с текущим размером), так что это безопасно на ходу.
+LOG_MAX_BYTES=15000000
+if [ -f bot.log ] && [ "$(wc -c < bot.log | tr -d ' ')" -gt "$LOG_MAX_BYTES" ]; then
+    gzip -f bot.log.old 2>/dev/null
+    mv bot.log bot.log.old
+    echo "bot.log превысил лимит — заротирован в bot.log.old"
+fi
+
 # Запускаем
 venv/bin/python3 main.py >> bot.log 2>&1 &
 PID=$!

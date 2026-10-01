@@ -416,7 +416,7 @@ def main():
         try:
             import asyncio as _asyncio
             from playwright.async_api import async_playwright
-            MESSENGER_URL = "https://messenger.360.yandex.ru"
+            MESSENGER_URL = "https://telemost.360.yandex.ru"  # messenger.360.yandex.ru переехал на Телемост (24.09.2026)
             import threading as _threading
             _cookies_result = []
             _ready_event = _threading.Event()

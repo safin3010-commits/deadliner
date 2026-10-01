@@ -36,3 +36,19 @@ start_jarvis.sh
 !data/english_rules_backup.json
 jarvis.py
 start_jarvis.sh
+
+# Ротированные логи (там переписка)
+bot.log.old*
+
+# Личные учебные материалы и выгрузки
+netology_conspekty_1_2/
+обучение_3_семестр/
+
+# Макеты и чужие скриншоты-референсы (могут содержать личное расписание; тяжёлые)
+design/mentor_references/
+design/mentor-concepts/
+designs/
+
+# Скомпилированное окно наставника (собирается из main.swift: swiftc -O main.swift -o MentorWidget)
+scripts/native_widget/MentorWidget
+scripts/native_widget/MentorWidget.*

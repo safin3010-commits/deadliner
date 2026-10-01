@@ -894,7 +894,7 @@ async def send_english_dialog(bot, chat_id: int):
             return
 
         situation = item.get("situation", "")
-        dialog    = item.get("dialog", [{}])[0]
+        dialog    = (item.get("dialog") or [{}])[0]
         vocab     = item.get("vocab", [])
 
         lines = []
@@ -903,7 +903,7 @@ async def send_english_dialog(bot, chat_id: int):
             lines.append(f"{speaker} _{v}_")
         dialog_text = "\n".join(lines)
 
-        vocab_lines = "\n".join([f"• *{v['word']}* — {v['meaning']}" for v in vocab])
+        vocab_lines = "\n".join([f"• *{v.get('word','')}* — {v.get('meaning','')}" for v in vocab])
 
         prompt = f"""Ты учишь разговорному английскому студента Pre-Intermediate через диалоги.
 Ситуация: {situation}

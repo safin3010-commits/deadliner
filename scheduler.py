@@ -3,8 +3,9 @@ import datetime
 import json
 import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from config import UFA_TZ, PARSE_HOURS, USER_NAME, WEATHER_LAT, WEATHER_LON
+from config import UFA_TZ, PARSE_HOURS, USER_NAME, WEATHER_LAT, WEATHER_LON, VK_CHAT_URLS, TASKS_FILE
 from storage import get_pending_tasks as _get_pending_raw, get_tasks, save_tasks
+from data_lock import file_lock, atomic_write_json
 
 
 def get_pending_tasks():
@@ -32,10 +33,203 @@ async def _retry(coro_fn, attempts=3, delay=5):
             if result:
                 return result
         except Exception as e:
-            print(f"_retry: попытка {i+1}/{attempts} упала: {e}")
+            print(f"_retry: попытка {i+1}/{attempts} упала: {e!r}")
         if i < attempts - 1:
             await asyncio.sleep(delay)
     return None
+
+
+async def _ask_claude_cli(prompt: str, timeout: int = 60, model: str = "claude-haiku-4-5-20251001") -> str:
+    """Разовый вызов `claude -p` без доступа к файлам — все нужные данные уже
+    переданы в prompt текстом, так что --allowedTools пустой. Использует
+    подписку Claude Code (как наставник), а не Groq — тот регулярно упирается
+    в лимит/недоступен (см. README, GROQ_KEY_1).
+
+    Разовый вызов без дневной сессии (claude_session.run_claude_oneshot):
+    раньше здесь был --resume сессии дня, и каждый вызов заново пересылал весь
+    разговор дня. Связность даёт get_ai_memory_recap() в самих промптах."""
+    from claude_session import run_claude_oneshot
+    append_system_prompt = (
+        # Явно закрепляем имя студента поверх системного промпта — этот
+        # вызов не получает файлового контекста и полагается только на
+        # текст prompt (обычно "{USER_NAME}а/у" грамматически склеенное).
+        # Обнаружено 2026-09-20: вечернее ИИ-сообщение вдруг стало
+        # обращаться "Илья" вместо "Ильнур" (реальный студент, не тот, кто
+        # использует бота) — и раз попав в data/ai_memory_log.json,
+        # самозакреплялось в каждом следующем вызове через get_ai_memory_recap().
+        f"Студента, для которого ты сейчас пишешь короткое сообщение, зовут "
+        f"{USER_NAME} — используй только это имя, даже если в тексте промпта "
+        f"или истории упоминаются другие имена людей (одногруппники, "
+        f"преподаватели и т.п.) — они НЕ адресат сообщения."
+    )
+    system_prompt = (
+        "Ты — личный наставник студента в Telegram-боте: пишешь по-русски, живо, "
+        "на «ты», без канцелярита. Все данные — в сообщении, файлы не читаешь.\n\n"
+        + append_system_prompt
+    )
+    text, err = await asyncio.to_thread(
+        run_claude_oneshot, prompt, system_prompt, timeout, model, "bot_ai_message",
+    )
+    if err:
+        print(f"Claude CLI: {err}")
+        return ""
+    # Страховка: модель иногда всё равно дописывает markdown-** (легаси
+    # Telegram Markdown понимает только одиночную *, двойная звёздочка
+    # оставалась бы в тексте буквально) — нормализуем на этом уровне
+    # один раз для всех вызовов, а не в каждом промпте отдельно.
+    return text.replace("**", "*")
+
+
+# ─── Общая память для учебных AI-сообщений ────────────────────────────
+# Не настоящая сессия Claude (--resume): между вызовами часы, кэш промптов
+# не спасает, а окно контекста (200к) кончится задолго до желаемых 400к —
+# каждый вызов пересчитывал бы всю историю с нуля и дороже, и медленнее.
+# Вместо этого — растущий журнал коротких записей (то, что реально было
+# отправлено пользователю) + периодически пересжимаемый в абзац "профиль"
+# устойчивых фактов. Каждый новый промпт получает маленький фиксированный
+# рекап, а не всю историю — стоимость вызова не растёт со временем.
+AI_MEMORY_LOG_FILE = "data/ai_memory_log.json"
+AI_MEMORY_PROFILE_FILE = "data/ai_memory_profile.txt"
+AI_MEMORY_LOG_MAX = 30   # после этого старые записи сжимаются в профиль
+AI_MEMORY_LOG_KEEP = 15  # сколько последних оставляем как есть при сжатии
+
+
+def _load_ai_memory_log() -> list:
+    try:
+        with open(AI_MEMORY_LOG_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _load_ai_memory_profile() -> str:
+    try:
+        with open(AI_MEMORY_PROFILE_FILE, encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+STUDY_KNOWLEDGE_FILE = "data/study_knowledge.json"
+# kind'ы, реально полезные для разбора дедлайнов/задач — не тащим в промпт
+# всё подряд (kind="candidate" — необработанные кандидаты, их в 6 раз больше
+# остальных вместе взятых, и большинство status=needs_review, не факт).
+_KNOWLEDGE_KINDS_FOR_TASKS = {"deadline", "course_organization", "homework", "schedule"}
+
+
+def get_relevant_knowledge_facts(course_names, limit: int = 6) -> str:
+    """Короткая выжимка организационных фактов из вебинаров (data/study_knowledge.json),
+    относящихся к данным курсам — для промптов scheduler.py (_ask_claude_cli без
+    доступа к файлам, весь контекст только текстом). Раньше этим пользовался
+    только наставник (scripts/mentor_checkin.py, отдельный процесс с доступом
+    к Read/Grep) — сам бот факты из вебинаров не учитывал вообще, даже когда
+    разбирал те же просроченные задачи, к которым эти факты прямо относятся.
+
+    Только status="active" (проверенные) — "needs_review" ещё не подтверждены,
+    не выдаём как факт. Файл может быть большим (эта же выжимка) — читаем и
+    фильтруем в Python, не полагаемся на то, что модель сама найдёт нужное
+    (не даём ей вообще доступа к файлу в этих промптах, только готовый текст)."""
+    try:
+        with open(STUDY_KNOWLEDGE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return ""
+
+    wanted = {c.strip().lower() for c in (course_names or []) if c and c.strip()}
+    if not wanted:
+        return ""
+
+    matched = []
+    for fact in data.get("facts", []) or []:
+        if fact.get("status") != "active":
+            continue
+        if fact.get("kind") not in _KNOWLEDGE_KINDS_FOR_TASKS:
+            continue
+        course = (fact.get("course") or "").strip().lower()
+        if not any(w in course or course in w for w in wanted):
+            continue
+        matched.append(fact)
+
+    if not matched:
+        return ""
+
+    # importance="high" вперёд, остальное — как есть (в файле уже примерно
+    # по порядку появления на вебинаре)
+    matched.sort(key=lambda f: 0 if f.get("importance") == "high" else 1)
+    matched = matched[:limit]
+
+    lines = [
+        f"- [{f.get('course','')}] {f.get('text','')}"
+        for f in matched
+    ]
+    return (
+        "Организационные факты с вебинаров по этим предметам (подтверждённые, "
+        "из data/study_knowledge.json) — учти при разборе, если релевантно, но "
+        "не выдумывай сверх того, что написано:\n" + "\n".join(lines)
+    )
+
+
+def get_ai_memory_recap() -> str:
+    """Короткий блок для вставки в промпт любого учебного AI-сообщения —
+    долгосрочный профиль + несколько последних записей. Синхронная —
+    только чтение файлов, без вызова AI."""
+    profile = _load_ai_memory_profile()
+    log = _load_ai_memory_log()[-5:]
+    parts = []
+    if profile:
+        parts.append(f"Долгосрочная память о студенте:\n{profile}")
+    if log:
+        recent = "\n".join(f"- [{e.get('source','')} {e.get('at','')[:10]}] {e.get('note','')}" for e in log)
+        parts.append(f"Последние сообщения ему по учёбе:\n{recent}")
+    if not parts:
+        return ""
+    return (
+        "\n\n".join(parts) +
+        "\n\nЭто память о прошлых сообщениях — не повторяй то же самое теми же словами, "
+        "учитывай, что уже говорилось."
+    )
+
+
+async def record_ai_memory(source: str, note: str):
+    """Фиксируем то, что реально отправили пользователю (source — например
+    'midday'/'evening'/'itog'/'analysis'). Когда журнал переполняется — не
+    обрезаем старое молча, а сжимаем его в долгосрочный профиль одним
+    вызовом Claude (дёшево: это разовая операция раз в N сообщений, а не
+    на каждый вызов)."""
+    with file_lock(AI_MEMORY_LOG_FILE):
+        log = _load_ai_memory_log()
+        log.append({
+            "at": datetime.datetime.now(tz=UFA_TZ).isoformat(),
+            "source": source,
+            "note": (note or "")[:400],
+        })
+        if len(log) > AI_MEMORY_LOG_MAX:
+            old, keep = log[:-AI_MEMORY_LOG_KEEP], log[-AI_MEMORY_LOG_KEEP:]
+            old_text = "\n".join(f"[{e.get('source','')} {e.get('at','')[:10]}] {e.get('note','')}" for e in old)
+            prev_profile = _load_ai_memory_profile()
+            prompt = (
+                (f"Текущий долгосрочный профиль студента:\n{prev_profile}\n\n" if prev_profile else "") +
+                f"Новые записи для объединения в профиль:\n{old_text}\n\n"
+                "Обнови долгосрочный профиль: устойчивые факты, повторяющиеся паттерны "
+                "поведения, важные обещания/прогнозы, которые стоит помнить надолго. "
+                "5-8 предложений, по-русски, связным текстом (без markdown, без списка), "
+                "только суть, без вступлений."
+            )
+            try:
+                new_profile = await _ask_claude_cli(prompt, timeout=90)
+            except Exception as e:
+                new_profile = ""
+                print(f"AI memory: сжатие профиля упало: {e!r}")
+            if new_profile:
+                try:
+                    with open(AI_MEMORY_PROFILE_FILE, "w", encoding="utf-8") as f:
+                        f.write(new_profile)
+                    log = keep
+                except Exception as e:
+                    print(f"AI memory: не удалось сохранить профиль: {e!r}")
+            # Если сжатие не удалось — записи не теряем, оставляем журнал как есть
+            # (он просто ещё немного подрастёт до следующей удачной попытки).
+        atomic_write_json(AI_MEMORY_LOG_FILE, log)
 
 
 def _jarvis_should_read(text: str) -> bool:
@@ -60,28 +254,29 @@ def _jarvis_should_read(text: str) -> bool:
 
 
 def _jarvis_write(text: str):
-    """Пишем сообщение в очередь для Джарвиса (атомарная запись)."""
+    """Пишем сообщение в очередь для Джарвиса (атомарная запись). Вызывается из
+    send_with_retry — а значит потенциально конкурентно из множества джобов
+    планировщика, поэтому read-modify-write защищён локом, как и остальные
+    общие data/*.json в этом файле."""
     if not _jarvis_should_read(text):
         return
     try:
         os.makedirs("data", exist_ok=True)
-        try:
-            with open(JARVIS_QUEUE_FILE) as f:
-                queue = json.load(f)
-        except Exception:
-            queue = []
-        queue.append({
-            "text": text,
-            "ts": datetime.datetime.now(tz=UFA_TZ).isoformat()
-        })
-        if len(queue) > 50:
-            queue = queue[-50:]
-        tmp = JARVIS_QUEUE_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(queue, f, ensure_ascii=False)
-        os.replace(tmp, JARVIS_QUEUE_FILE)
+        with file_lock(JARVIS_QUEUE_FILE):
+            try:
+                with open(JARVIS_QUEUE_FILE) as f:
+                    queue = json.load(f)
+            except Exception:
+                queue = []
+            queue.append({
+                "text": text,
+                "ts": datetime.datetime.now(tz=UFA_TZ).isoformat()
+            })
+            if len(queue) > 50:
+                queue = queue[-50:]
+            atomic_write_json(JARVIS_QUEUE_FILE, queue)
     except Exception as e:
-        print(f"Jarvis queue error: {e}")
+        print(f"Jarvis queue error: {e!r}")
 RANDOM_SCHEDULE_FILE = "data/random_reminders.json"
 LESSON_REMINDERS_FILE = "data/lesson_reminders_sent.json"
 SENT_NOTIFICATIONS_FILE = "data/sent_notifications.json"
@@ -227,12 +422,18 @@ def _is_notification_sent(key: str) -> bool:
 
 
 def _mark_notification_sent(key: str):
-    sent = _load_sent_notifications()
-    sent.add(key)
-    # Храним не больше 1000 записей
-    if len(sent) > 1000:
-        sent = set(list(sent)[-1000:])
-    _save_sent_notifications(sent)
+    # file_lock — вызывается из нескольких независимых джобов планировщика
+    # (check_grades_and_notify, check_lms_grades_and_notify и т.д.), которые
+    # реально могут выполняться параллельно (разные offset'ы старта на одном
+    # 60-минутном интервале). Без лока конкурентный read-modify-write мог
+    # потерять чужую отметку "отправлено" — та же оценка ушла бы дублем.
+    with file_lock(SENT_NOTIFICATIONS_FILE):
+        sent = _load_sent_notifications()
+        sent.add(key)
+        # Храним не больше 1000 записей
+        if len(sent) > 1000:
+            sent = set(list(sent)[-1000:])
+        _save_sent_notifications(sent)
 DEADLINE_SENT_FILE = "data/sent_deadline_reminders.json"
 
 
@@ -253,61 +454,227 @@ def _save_pending_notifications(notifications: list):
 
 
 def _add_pending_notification(chat_id: int, text: str, parse_mode: str = "Markdown"):
-    pending = _load_pending_notifications()
-    # Дедупликация — не добавляем если такой текст уже есть в очереди
-    for existing in pending:
-        if existing.get("chat_id") == chat_id and existing.get("text") == text:
-            print(f"Scheduler: дубликат уведомления пропущен")
-            return
-    pending.append({
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": parse_mode,
-        "created_at": datetime.datetime.now(tz=UFA_TZ).isoformat(),
-        "attempts": 0,
-    })
-    _save_pending_notifications(pending)
-    print(f"Scheduler: уведомление в очередь (всего: {len(pending)})")
+    # file_lock — send_with_retry (и через него _add_pending_notification)
+    # вызывается конкурентно из множества независимых джобов планировщика
+    # (почта/мессенджер/ВК/оценки и т.д.), особенно пачкой в начале тихих
+    # часов. Без лока конкурентный read-modify-write мог потерять чужое
+    # уведомление, добавленное почти одновременно.
+    with file_lock(PENDING_NOTIFICATIONS_FILE):
+        pending = _load_pending_notifications()
+        # Дедупликация — не добавляем если такой текст уже есть в очереди
+        for existing in pending:
+            if existing.get("chat_id") == chat_id and existing.get("text") == text:
+                print(f"Scheduler: дубликат уведомления пропущен")
+                return
+        pending.append({
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": parse_mode,
+            "created_at": datetime.datetime.now(tz=UFA_TZ).isoformat(),
+            "attempts": 0,
+        })
+        _save_pending_notifications(pending)
+        print(f"Scheduler: уведомление в очередь (всего: {len(pending)})")
 
 
-async def send_with_retry(bot, chat_id: int, text: str, parse_mode: str = "Markdown", reply_markup=None, ignore_quiet_hours: bool = False):
-    # Тихие часы 00:00-09:00 — не отправляем (кроме явного игнорирования)
+def _in_quiet_hours(now_h: int) -> bool:
+    """Бот работает 8:00-22:00 — за пределами этого окна ничего не шлём,
+    всё уходит в очередь и доставляется retry_pending_notifications с 8 утра."""
+    return now_h >= 22 or now_h < 8
+
+
+def _split_for_telegram(text: str, limit: int = 3900) -> list[str]:
+    """Если текст не влезает в лимит Telegram на одно сообщение (4096 симв.) —
+    делим по границам строк и шлём несколько сообщений подряд. Контент никогда
+    не обрезаем (было — почта/мессенджер резались по [:600])."""
+    if len(text) <= limit:
+        return [text]
+    parts, rest = [], text
+    while len(rest) > limit:
+        cut = rest.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        parts.append(rest[:cut])
+        rest = rest[cut:].lstrip("\n")
+    if rest:
+        parts.append(rest)
+    return parts
+
+
+async def send_with_retry(bot, chat_id: int, text: str, parse_mode: str = "Markdown", reply_markup=None, ignore_quiet_hours: bool = False, disable_web_page_preview: bool = False):
+    # Тихие часы 22:00-08:00 — не отправляем (кроме явного игнорирования)
     if not ignore_quiet_hours:
         now_h = datetime.datetime.now(tz=UFA_TZ).hour
-        if 0 <= now_h < 9:
+        if _in_quiet_hours(now_h):
             print(f"Scheduler: тихие часы ({now_h}:xx) — сообщение отложено")
             _add_pending_notification(chat_id, text, parse_mode)
             return False
-    try:
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode, reply_markup=reply_markup)
-        _jarvis_write(text)
-        return True
-    except Exception as e:
-        print(f"Scheduler: не удалось отправить: {e}")
-        _add_pending_notification(chat_id, text, parse_mode)
-        return False
+    chunks = _split_for_telegram(text)
+    ok = True
+    for i, chunk in enumerate(chunks):
+        kb = reply_markup if i == len(chunks) - 1 else None
+        try:
+            await bot.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode, reply_markup=kb,
+                                    disable_web_page_preview=disable_web_page_preview)
+            _jarvis_write(chunk)
+        except Exception as e:
+            # Разбивка могла задеть HTML-тег (например <blockquote> без пары
+            # в этом куске) — пробуем без форматирования, чтобы не терять
+            # содержимое из-за подсветки.
+            try:
+                await bot.send_message(chat_id=chat_id, text=chunk, reply_markup=kb,
+                                        disable_web_page_preview=disable_web_page_preview)
+                _jarvis_write(chunk)
+            except Exception as e2:
+                print(f"Scheduler: не удалось отправить: {e2}")
+                _add_pending_notification(chat_id, chunk, parse_mode)
+                ok = False
+    return ok
 
 
 async def retry_pending_notifications(bot):
+    # Источники (почта/ВК/мессенджер/Netology/Gmail) помечают сообщение
+    # "увиденным" ДО попытки отправки (осознанно — иначе следующий же
+    # цикл опроса найдёт тот же непрочитанный элемент и продублирует его
+    # в эту же очередь; _add_pending_notification и так дедуплицирует по
+    # точному тексту, но параллельная прямая отправка при восстановлении
+    # сети всё равно могла бы уйти вторым разом). Поэтому здесь — единственное
+    # место, откуда сообщение реально может дойти до пользователя, если первая
+    # попытка не удалась. Раньше после 144 попыток (~24ч) запись тихо
+    # выбрасывалась — при сутки-длинном сбое сети/Telegram сообщение исчезало
+    # безвозвратно, и источник уже никогда не отдаст его повторно. Теперь
+    # повторяем без ограничения по времени — риска бесконтрольного роста нет,
+    # т.к. новые записи не дублируются (дедуп по тексту), а старые постепенно
+    # уходят по мере восстановления связи.
     now_h = datetime.datetime.now(tz=UFA_TZ).hour
-    if 0 <= now_h < 9:
+    if _in_quiet_hours(now_h):
         return
-    pending = _load_pending_notifications()
-    if not pending:
-        return
-    print(f"Scheduler: retry {len(pending)} уведомлений...")
-    still_pending = []
-    for n in pending:
-        try:
-            await bot.send_message(chat_id=n["chat_id"], text=n["text"], parse_mode=n.get("parse_mode", "Markdown"))
-        except Exception:
-            n["attempts"] = n.get("attempts", 0) + 1
-            if n["attempts"] < 144:
+    # file_lock на весь цикл (включая await bot.send_message) — та же причина,
+    # что и в _add_pending_notification: без него параллельная постановка
+    # нового уведомления в очередь во время этого прогона read-modify-write
+    # могла бы затереться финальной записью still_pending.
+    with file_lock(PENDING_NOTIFICATIONS_FILE):
+        pending = _load_pending_notifications()
+        if not pending:
+            return
+        print(f"Scheduler: retry {len(pending)} уведомлений...")
+        still_pending = []
+        for n in pending:
+            try:
+                await bot.send_message(chat_id=n["chat_id"], text=n["text"], parse_mode=n.get("parse_mode", "Markdown"))
+            except Exception as e:
+                n["attempts"] = n.get("attempts", 0) + 1
+                if n["attempts"] % 50 == 0:
+                    print(f"Scheduler: уведомление всё ещё не доставлено после {n['attempts']} попыток: {e!r}")
                 still_pending.append(n)
-    _save_pending_notifications(still_pending)
+        _save_pending_notifications(still_pending)
 
 
 # ─── Синхронизация расписания ─────────────────────────────────────────
+
+async def refresh_schedule_cache_silent(bot=None, chat_id=None):
+    """Тихое фоновое обновление data/schedule_cache.json (Modeus + Нетология),
+    без отправки чего-либо в Telegram. Раньше единственный код, который живьём
+    наполнял этот файл (get_week_schedule), запускался только как побочный
+    эффект проактивных утренних/дневных брифингов — после их отключения
+    (наставник теперь отдельным процессом) кэш перестал обновляться сам
+    вообще, единственный способ был вручную зайти в /schedule и нажать
+    «Загрузить свежее». Наставник и виджет на столе читали замороженный
+    снимок (пропускали новые/перенесённые пары, например английский).
+    get_week_schedule сам кэширует Modeus-часть на 12ч — при более частом
+    вызове это дёшево (без запроса) — данные подтягиваются не чаще, чем
+    реально имеет смысл."""
+    from storage import is_quiz_active
+    if is_quiz_active():
+        print("refresh_schedule_cache: пропуск — активен квиз")
+        return
+    try:
+        from parsers.modeus import get_week_schedule, _load_schedule_cache, _save_schedule_cache, SCHEDULE_CACHE_FILE
+        from parsers.netology import fetch_netology_schedule_week
+        from data_lock import file_lock
+
+        today = datetime.datetime.now(tz=UFA_TZ).date()
+        this_week = today - datetime.timedelta(days=today.weekday())
+        for week_start in (this_week, this_week + datetime.timedelta(weeks=1)):
+            key = week_start.isoformat()
+            # get_week_schedule делает 7 последовательных запросов к Modeus
+            # (по дню) при промахе кэша — 25с (как в интерактивном /schedule,
+            # где торопиться есть ради) тут не хватает, это фоновая джоба.
+            modeus_data, netology_data = await asyncio.gather(
+                asyncio.wait_for(get_week_schedule(week_start), timeout=90),
+                asyncio.wait_for(fetch_netology_schedule_week(week_start), timeout=30),
+                return_exceptions=True,
+            )
+
+            with file_lock(SCHEDULE_CACHE_FILE):
+                cache = _load_schedule_cache()
+                prev = cache.get(key, {})
+
+                # get_schedule()/fetch_netology_schedule_week() сами глотают сетевые
+                # ошибки и при сбое возвращают ПУСТОЙ результат, а не исключение —
+                # неотличимо от "пар реально нет". Если раньше в кэше были реальные
+                # пары на эту неделю, а сейчас внезапно пусто — это больше похоже на
+                # сбой запроса, чем на то, что все пары одновременно исчезли, так
+                # что не затираем последние хорошие данные пустотой.
+                if isinstance(modeus_data, Exception) or not isinstance(modeus_data, dict):
+                    print(f"refresh_schedule_cache: Modeus ошибка ({key}): {type(modeus_data).__name__}: {modeus_data}")
+                    modeus_data = None
+                elif not any(modeus_data.values()) and any((prev.get("data") or {}).values()):
+                    print(f"refresh_schedule_cache: Modeus вернул пусто для {key} при непустом прежнем кэше — похоже на сбой, оставляем прежние данные")
+                    modeus_data = None
+
+                if isinstance(netology_data, Exception) or not isinstance(netology_data, dict):
+                    print(f"refresh_schedule_cache: Нетология ошибка ({key}): {type(netology_data).__name__}: {netology_data}")
+                    netology_data = None
+                elif not any(netology_data.values()) and any((prev.get("netology") or {}).values()):
+                    print(f"refresh_schedule_cache: Нетология вернула пусто для {key} при непустом прежнем кэше — оставляем прежние данные")
+                    netology_data = None
+
+                # Резерв — yetanothercalendar.ru, только если И Modeus, И Нетология
+                # сами по себе не смогли отдать день (а не просто "пар нет" —
+                # modeus_data/netology_data уже None именно на этом основании выше).
+                # Раньше yetanothercalendar использовался только для сверки текста
+                # наставника и ссылок на вебинары, настоящим резервом при сбое
+                # основных источников не был — при полном отказе Modeus/Нетологии
+                # расписание оставалось прежним замороженным кэшем без изменений.
+                if (modeus_data is None or netology_data is None) and week_start == this_week:
+                    try:
+                        from parsers.yetanothercalendar import fetch_week_events, to_day_schedule
+                        yac_result = await asyncio.wait_for(fetch_week_events(), timeout=40)
+                    except Exception as ye:
+                        print(f"refresh_schedule_cache: yetanothercalendar резерв не удался: {ye!r}")
+                        yac_result = None
+                    if yac_result:
+                        yac_modeus, yac_netology = {}, {}
+                        for i in range(7):
+                            day = week_start + datetime.timedelta(days=i)
+                            day_key = day.isoformat()
+                            day_events = to_day_schedule(yac_result, day)
+                            yac_modeus[day_key] = [e for e in day_events if e.get("source") != "netology"]
+                            yac_netology[day_key] = [e for e in day_events if e.get("source") == "netology"]
+                        # Только если yetanothercalendar реально что-то нашёл на неделю —
+                        # иначе он тоже мог не открыться (протухшая сессия и т.п.),
+                        # и лучше остаться на прежнем кэше, чем затереть его пустотой.
+                        if modeus_data is None and any(yac_modeus.values()):
+                            modeus_data = yac_modeus
+                            print(f"refresh_schedule_cache: Modeus восстановлен через yetanothercalendar ({key})")
+                        if netology_data is None and any(yac_netology.values()):
+                            netology_data = yac_netology
+                            print(f"refresh_schedule_cache: Нетология восстановлена через yetanothercalendar ({key})")
+
+                if modeus_data is None and netology_data is None:
+                    continue  # ни одна часть реально не обновилась — нечего сохранять
+
+                cache[key] = {
+                    "cached_at": datetime.datetime.now(tz=datetime.UTC).isoformat(),
+                    "data": modeus_data if modeus_data is not None else prev.get("data", {}),
+                    "netology": netology_data if netology_data is not None else prev.get("netology", {}),
+                }
+                _save_schedule_cache(cache)
+        print("refresh_schedule_cache: обновлено")
+    except Exception as e:
+        print(f"refresh_schedule_cache error: {e!r}")
+
 
 async def _fetch_schedule_fresh_or_cache() -> list:
     """Загружаем расписание на сегодня — сначала свежее, при ошибке кэш."""
@@ -318,11 +685,14 @@ async def _fetch_schedule_fresh_or_cache() -> list:
         today = datetime.datetime.now(tz=UFA_TZ).date()
         week_start = today - datetime.timedelta(days=today.weekday())
 
-        # Сбрасываем кэш текущей недели чтобы загрузить свежее
+        # Читаем текущий кэш недели — НЕ стираем его (раньше весь кэш недели
+        # удалялся здесь в начале и никогда не восстанавливался, эта функция
+        # его только читала и выкидывала результат: другие читатели той же
+        # недели, например _fetch_tomorrow_schedule, получали пустоту до
+        # следующего фонового refresh_schedule_cache_silent, раз в 4ч).
         cache = _load_schedule_cache()
-        if week_start.isoformat() in cache:
-            del cache[week_start.isoformat()]
-            _save_schedule_cache(cache)
+        entry = cache.get(week_start.isoformat(), {})
+        prev_netology = entry.get("netology", {})
 
         jwt_token = await _asyncio.wait_for(get_cached_jwt(), timeout=25)
         person_id = get_person_id_from_jwt(jwt_token) if jwt_token else None
@@ -335,16 +705,39 @@ async def _fetch_schedule_fresh_or_cache() -> list:
         # Добавляем Нетологию
         try:
             from parsers.netology import fetch_netology_schedule_week
-            week_start = today - datetime.timedelta(days=today.weekday())
             netology_week = await _asyncio.wait_for(
                 fetch_netology_schedule_week(week_start), timeout=20
             )
             netology_today = netology_week.get(today.isoformat(), []) if isinstance(netology_week, dict) else []
             print(f"Нетология: занятий на сегодня — {len(netology_today)}")
         except Exception as ne:
-            print(f"Нетология today error: {ne}")
-            netology_today = []
+            netology_today = prev_netology.get(today.isoformat(), [])
+            print(f"Нетология today error: {ne!r} — используем предыдущий кэш ({len(netology_today)})")
 
+        # Обновляем в кэше только СЕГОДНЯШНИЙ день недели — остальные дни не
+        # трогаем, чтобы другие читатели (например завтрашний день из
+        # _fetch_tomorrow_schedule) не теряли данные из-за этого вызова.
+        from data_lock import file_lock
+        from parsers.modeus import SCHEDULE_CACHE_FILE
+        with file_lock(SCHEDULE_CACHE_FILE):
+            cache = _load_schedule_cache()
+            entry = cache.get(week_start.isoformat(), {})
+            modeus_data = dict(entry.get("data", {}))
+            modeus_data[today.isoformat()] = modeus_schedule
+            netology_data = dict(entry.get("netology", prev_netology))
+            netology_data[today.isoformat()] = netology_today
+            cache[week_start.isoformat()] = {
+                "cached_at": datetime.datetime.now(tz=datetime.UTC).isoformat(),
+                "data": modeus_data,
+                "netology": netology_data,
+            }
+            _save_schedule_cache(cache)
+
+        # ВАЖНО: Modeus и Нетология — это ДВА РАЗНЫХ РЕАЛЬНЫХ источника пар,
+        # даже если у записей совпадает время и похожи названия курса —
+        # никогда не дедуплицировать между ними (было ошибочно "исправлено"
+        # 2026-09-17 как "дубли", пользователь подтвердил, что это две
+        # разные реальные пары — откатано в тот же день).
         combined = sorted(modeus_schedule + netology_today, key=lambda x: x.get("start_time", ""))
         return combined
 
@@ -360,21 +753,64 @@ async def _fetch_schedule_fresh_or_cache() -> list:
 
 # ─── Синхронизация задач ─────────────────────────────────────────────
 
+AUTH_FAILURE_ALERTS_FILE = "data/auth_failure_alerts.json"
+AUTH_FAILURE_ALERT_COOLDOWN_HOURS = 6
+
+
+async def _alert_auth_failure_once(bot, chat_id, service_label: str, key: str, detail: str):
+    """Явная ошибка авторизации (не "данных просто нет") — раньше это тихо
+    выглядело как "новых заданий нет" неделями, пока пароль/сессия не были
+    восстановлены вручную (см. ModeusAuthError — тот же принцип, теперь и
+    для Netology/LMS). Не чаще AUTH_FAILURE_ALERT_COOLDOWN_HOURS на сервис,
+    чтобы не спамить на каждый часовой прогон sync_all_tasks."""
+    if not bot or not chat_id:
+        return
+    try:
+        with open(AUTH_FAILURE_ALERTS_FILE) as f:
+            state = json.load(f)
+    except Exception:
+        state = {}
+    now = datetime.datetime.now(tz=UFA_TZ)
+    last = state.get(key)
+    if last:
+        hours = (now - datetime.datetime.fromisoformat(last)).total_seconds() / 3600
+        if hours < AUTH_FAILURE_ALERT_COOLDOWN_HOURS:
+            return
+    await send_with_retry(
+        bot, chat_id,
+        f"⚠️ *{service_label}*: не получилось авторизоваться ({detail}). "
+        f"Похоже на протухший пароль/сессию, а не на то, что заданий просто нет — "
+        f"стоит проверить вручную.",
+    )
+    state[key] = now.isoformat()
+    os.makedirs("data", exist_ok=True)
+    with open(AUTH_FAILURE_ALERTS_FILE, "w") as f:
+        json.dump(state, f, ensure_ascii=False)
+
+
 async def sync_all_tasks(bot=None, chat_id=None):
     """Синхронизируем LMS и Нетологию."""
     from storage import is_quiz_active
     if is_quiz_active():
         print("sync_all_tasks: пропуск — активен квиз")
         return
+    _tasks_lock = None
     try:
-        from parsers.lms import fetch_lms_deadlines
-        from parsers.netology import fetch_netology_deadlines
+        from parsers.lms import fetch_lms_deadlines, LMSAuthError
+        from parsers.netology import fetch_netology_deadlines, NetologyAuthError
 
         lms_result, netology_result = await asyncio.gather(
             fetch_lms_deadlines(),
             fetch_netology_deadlines(),
             return_exceptions=True
         )
+
+        if isinstance(lms_result, LMSAuthError):
+            print(f"sync_all_tasks: LMS auth error: {lms_result!r}")
+            await _alert_auth_failure_once(bot, chat_id, "LMS", "lms", str(lms_result))
+        if isinstance(netology_result, NetologyAuthError):
+            print(f"sync_all_tasks: Netology auth error: {netology_result!r}")
+            await _alert_auth_failure_once(bot, chat_id, "Нетология", "netology", str(netology_result))
 
         existing_tasks = get_tasks()
         existing_ids = {t.get("id") for t in existing_tasks}
@@ -394,12 +830,25 @@ async def sync_all_tasks(bot=None, chat_id=None):
 
         # Нетология
         netology_tasks = []
+        netology_completed_ids = set()
         if isinstance(netology_result, tuple):
-            netology_tasks, _ = netology_result
+            netology_tasks, _, netology_completed_ids = netology_result
         elif isinstance(netology_result, list):
             netology_tasks = netology_result
+        if netology_completed_ids:
+            from storage import mark_netology_tasks_done
+            marked = mark_netology_tasks_done(netology_completed_ids)
+            if marked:
+                print(f"sync_all_tasks: помечено выполненными {marked} Netology задач")
 
-        # Перезагружаем после mark_lms_tasks_done — он мог изменить файл
+        # Перезагружаем после mark_lms_tasks_done — он мог изменить файл.
+        # Держим file_lock на весь остаток функции (до save_tasks ниже) —
+        # без этого узкое окно между чтением и записью могло бы затереть
+        # параллельную отметку "выполнено" (mark_task_done из бота,
+        # mark_lms_tasks_done из другого прогона). __enter__/__exit__
+        # вручную, а не "with", чтобы не переотступать весь блок ниже.
+        _tasks_lock = file_lock(TASKS_FILE)
+        _tasks_lock.__enter__()
         existing_tasks = get_tasks()
         existing_ids = {t.get("id") for t in existing_tasks}
 
@@ -438,50 +887,54 @@ async def sync_all_tasks(bot=None, chat_id=None):
                     existing_tasks.append(t)
                     existing_ids.add(task_id)
                     added += 1
+                    _log_task_added_recent(t)
 
             # Уведомление — отдельно от добавления, по notified_key
-            if bot and chat_id and t.get("source") in ("lms", "netology"):
-                if notif_key not in notified:
-                    # Тихий старт — первые 20 минут только помечаем, не шлём
-                    grace_file = "data/startup_grace.json"
-                    in_grace = False
-                    try:
-                        if _os3.path.exists(grace_file):
-                            import time as _time
-                            grace_data = json.load(open(grace_file))
-                            if _time.time() - grace_data.get("started_at", 0) < 1200:
-                                in_grace = True
-                    except Exception:
-                        pass
-                    notified.append(notif_key)
-                    notified_changed = True
-                    if in_grace:
-                        continue
-                    from bot.messages import _esc_md
-                    source_name = "LMS" if t.get("source") == "lms" else "Нетология"
-                    title = _esc_md(t.get("title", "Без названия"))
-                    course = _esc_md(t.get("course_name", ""))
-                    deadline = t.get("deadline", "")
-                    deadline_str = ""
-                    if deadline:
-                        try:
-                            dt = datetime.datetime.fromisoformat(deadline).astimezone(UFA_TZ)
-                            deadline_str = f"\n📅 Дедлайн: {dt.strftime('%d.%m.%Y %H:%M')}"
-                        except Exception:
-                            pass
-                    text = (
-                        f"💬 *{source_name}*\n"
-                        "\n"
-                        "💬 Новая задача\n"
-                        "────────────────────\n"
-                        f"📌 {title}\n"
-                        f"📚 {course}"
-                        f"{deadline_str}"
-                    )
-                    try:
-                        await bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
-                    except Exception as ex:
-                        print(f"sync_all_tasks: не удалось отправить уведомление: {ex}")
+            # Push-уведомления бота отключены (мессенджер и т.п.) — синхронизация остаётся тихой.
+            # Оставлено закомментированным, чтобы легко вернуть при желании
+            # (как и остальные отключённые джобы в setup_scheduler ниже).
+            # if bot and chat_id and t.get("source") in ("lms", "netology"):
+            #     if notif_key not in notified:
+            #         # Тихий старт — первые 20 минут только помечаем, не шлём
+            #         grace_file = "data/startup_grace.json"
+            #         in_grace = False
+            #         try:
+            #             if _os3.path.exists(grace_file):
+            #                 import time as _time
+            #                 grace_data = json.load(open(grace_file))
+            #                 if _time.time() - grace_data.get("started_at", 0) < 1200:
+            #                     in_grace = True
+            #         except Exception:
+            #             pass
+            #         notified.append(notif_key)
+            #         notified_changed = True
+            #         if in_grace:
+            #             continue
+            #         from bot.messages import _esc_md
+            #         source_name = "LMS" if t.get("source") == "lms" else "Нетология"
+            #         title = _esc_md(t.get("title", "Без названия"))
+            #         course = _esc_md(t.get("course_name", ""))
+            #         deadline = t.get("deadline", "")
+            #         deadline_str = ""
+            #         if deadline:
+            #             try:
+            #                 dt = datetime.datetime.fromisoformat(deadline).astimezone(UFA_TZ)
+            #                 deadline_str = f"\n📅 Дедлайн: {dt.strftime('%d.%m.%Y %H:%M')}"
+            #             except Exception:
+            #                 pass
+            #         text = (
+            #             f"💬 *{source_name}*\n"
+            #             "\n"
+            #             "💬 Новая задача\n"
+            #             "────────────────────\n"
+            #             f"📌 {title}\n"
+            #             f"📚 {course}"
+            #             f"{deadline_str}"
+            #         )
+            #         try:
+            #             await bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+            #         except Exception as ex:
+            #             print(f"sync_all_tasks: не удалось отправить уведомление: {ex}")
 
         if updated:
             print(f"Scheduler: обновлено дедлайнов: {updated}")
@@ -497,10 +950,19 @@ async def sync_all_tasks(bot=None, chat_id=None):
                     json.dump(notified[-500:], _f, ensure_ascii=False)
                 print(f"sync_all_tasks: сохранено {len(notified)} уведомлённых задач")
             except Exception as e:
-                print(f"sync_all_tasks: ошибка сохранения notified: {e}")
+                print(f"sync_all_tasks: ошибка сохранения notified: {e!r}")
 
     except Exception as e:
-        print(f"Scheduler sync error: {e}")
+        print(f"Scheduler sync error: {e!r}")
+    finally:
+        # Гарантируем разблокировку даже при исключении внутри защищённого
+        # участка — иначе flock так и останется висеть до перезапуска бота,
+        # и все последующие мутации tasks.json (mark_task_done и т.п.) встанут.
+        if _tasks_lock is not None:
+            try:
+                _tasks_lock.__exit__(None, None, None)
+            except Exception:
+                pass
 
 
 # ─── Утренний брифинг 9:00 ───────────────────────────────────────────
@@ -522,7 +984,7 @@ async def _get_study_analysis_short() -> str:
         result = await ask_grok(prompt, system="Ты академический аналитик. Отвечай кратко — строго 5-6 предложений.")
         return result or ""
     except Exception as e:
-        print(f"Study analysis short error: {e}")
+        print(f"Study analysis short error: {e!r}")
         return ""
 
 # ─── Дневной брифинг 14:00 ───────────────────────────────────────────
@@ -530,38 +992,68 @@ async def _get_study_analysis_short() -> str:
 
 
 async def _fetch_tomorrow_schedule() -> list:
-    """Расписание на завтра — Modeus + Нетология."""
+    """Расписание на завтра — Modeus + Нетология. Сначала кэш (его каждые 4ч
+    наполняет refresh_schedule_cache_silent) — живой запрос только при
+    промахе. Раньше Нетология ВСЕГДА бралась живым запросом, даже когда
+    Modeus брался из кэша — лишний повторный логин в Netology внутри той же
+    самой функции брифинга (после sync_all_tasks() и schedule-fetch чуть выше)
+    регулярно упирался в таймаут 20с (в логах было видно как пустое
+    "netology error: " — это asyncio.TimeoutError, у которого str() пустая
+    строка) и завтрашние вебинары просто пропадали из сообщения."""
     try:
-        from parsers.modeus import _load_schedule_cache, get_week_schedule
+        from parsers.modeus import _load_schedule_cache, _save_schedule_cache, get_week_schedule, SCHEDULE_CACHE_FILE
         from parsers.netology import fetch_netology_schedule_week
+        from data_lock import file_lock
         tomorrow = (datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(days=1)).date()
         week_start = tomorrow - datetime.timedelta(days=tomorrow.weekday())
+        tomorrow_key = tomorrow.isoformat()
 
-        # Modeus — сначала кэш, потом живой запрос
-        modeus_tomorrow = []
         cache = _load_schedule_cache()
-        entry = cache.get(week_start.isoformat())
-        if entry:
-            modeus_tomorrow = entry.get("data", {}).get(tomorrow.isoformat(), [])
-        if not modeus_tomorrow:
-            print("_fetch_tomorrow_schedule: кэша нет, запрашиваем Modeus...")
+        entry = cache.get(week_start.isoformat()) or {}
+
+        # Modeus — кэш есть, только если ИМЕННО завтрашний день реально в нём
+        # присутствует (раньше проверяли только наличие ключа "data" у недели —
+        # пустой список для конкретного дня ошибочно считался "есть в кэше").
+        if tomorrow_key in entry.get("data", {}):
+            modeus_tomorrow = entry["data"][tomorrow_key]
+        else:
+            print("_fetch_tomorrow_schedule: кэша Modeus нет, запрашиваем...")
             week_data = await asyncio.wait_for(get_week_schedule(week_start), timeout=25)
-            modeus_tomorrow = week_data.get(tomorrow.isoformat(), [])
+            modeus_tomorrow = week_data.get(tomorrow_key, [])
 
-        # Нетология
-        netology_tomorrow = []
-        try:
-            netology_week = await asyncio.wait_for(
-                fetch_netology_schedule_week(week_start), timeout=20
-            )
-            netology_tomorrow = netology_week.get(tomorrow.isoformat(), [])
-        except Exception as ne:
-            print(f"_fetch_tomorrow_schedule netology error: {ne}")
+        # Нетология — та же логика. При удачном живом запросе сохраняем
+        # результат в кэш (раньше не сохраняли — следующий читатель снова
+        # бил Netology живым запросом вместо использования уже полученных
+        # данных).
+        if tomorrow_key in entry.get("netology", {}):
+            netology_tomorrow = entry["netology"][tomorrow_key]
+        else:
+            netology_tomorrow = []
+            try:
+                netology_week = await asyncio.wait_for(
+                    fetch_netology_schedule_week(week_start), timeout=20
+                )
+                netology_tomorrow = netology_week.get(tomorrow_key, [])
+                with file_lock(SCHEDULE_CACHE_FILE):
+                    cache2 = _load_schedule_cache()
+                    entry2 = cache2.get(week_start.isoformat(), {})
+                    netology_data = dict(entry2.get("netology", {}))
+                    netology_data[tomorrow_key] = netology_tomorrow
+                    cache2[week_start.isoformat()] = {
+                        "cached_at": entry2.get("cached_at") or datetime.datetime.now(tz=datetime.UTC).isoformat(),
+                        "data": entry2.get("data", {}),
+                        "netology": netology_data,
+                    }
+                    _save_schedule_cache(cache2)
+            except Exception as ne:
+                print(f"_fetch_tomorrow_schedule netology error: {ne!r}")
 
+        # ВАЖНО: Modeus и Нетология — разные реальные источники пар, не дедуплицировать
+        # (см. комментарий в _fetch_schedule_fresh_or_cache выше).
         combined = sorted(modeus_tomorrow + netology_tomorrow, key=lambda x: x.get("start_time", ""))
         return combined
     except Exception as e:
-        print(f"_fetch_tomorrow_schedule error: {e}")
+        print(f"_fetch_tomorrow_schedule error: {e!r}")
         return []
 
 
@@ -612,18 +1104,16 @@ async def check_deadline_reminders(bot, chat_id: int):
             except Exception:
                 continue
         if changed:
-            # Чистим старые записи — оставляем только за последние 90 дней
-            cutoff = (now - datetime.timedelta(days=90)).timestamp()
-            sent_data["sent"] = [
-                k for k in sent
-                if not k.split("_")[0].isdigit() or True  # id не timestamp — оставляем всё новое
-            ]
-            # Ограничиваем размер — не более 500 записей
+            # _load_sent_deadlines уже сбрасывает "sent" в пустой список при смене
+            # даты — отдельная по-возрастная чистка здесь была не нужна (и была
+            # сломана: `if not k.split("_")[0].isdigit() or True` — `or True` делает
+            # условие всегда истинным, ничего не отфильтровывает). Оставляем только
+            # ограничение размера на случай очень длинного дня.
             if len(sent_data["sent"]) > 500:
                 sent_data["sent"] = sent_data["sent"][-500:]
             _save_sent_deadlines(sent_data)
     except Exception as e:
-        print(f"Scheduler deadline reminders error: {e}")
+        print(f"Scheduler deadline reminders error: {e!r}")
 
 
 # ─── Оценки ──────────────────────────────────────────────────────────
@@ -649,7 +1139,7 @@ async def check_grades_and_notify(bot, chat_id: int):
             if marked:
                 print(f"Scheduler grades: помечено выполненными из LMS: {marked}")
         except Exception as e:
-            print(f"Scheduler grades LMS error: {e}")
+            print(f"Scheduler grades LMS error: {e!r}")
 
         # Тихий старт — первые 20 минут только помечаем, не шлём
         import time as _time2, json as _json2, os as _os2
@@ -657,7 +1147,7 @@ async def check_grades_and_notify(bot, chat_id: int):
         try:
             if _os2.path.exists("data/startup_grace.json"):
                 _grace = _json2.load(open("data/startup_grace.json"))
-                if _time2.time() - _grace.get("started_at", 0) < 120:
+                if _time2.time() - _grace.get("started_at", 0) < 1200:
                     _in_grace = True
         except Exception:
             pass
@@ -677,12 +1167,13 @@ async def check_grades_and_notify(bot, chat_id: int):
             sent_ok = await send_with_retry(bot, chat_id, text)
             if sent_ok:
                 _mark_notification_sent(grade_key)
+                _log_grade_recent(grade, "modeus")
                 if "_seen" in grade:
                     from parsers.modeus_grades import _save_seen
                     _save_seen(grade["_seen"])
 
     except Exception as e:
-        print(f"Scheduler grades check error: {e}")
+        print(f"Scheduler grades check error: {e!r}")
 
 
 # ─── Почта и мессенджер ───────────────────────────────────────────────
@@ -695,21 +1186,169 @@ async def check_mail_and_notify(bot, chat_id: int):
         from storage import add_seen_message
         emails = await fetch_new_emails()
         for email_data in emails:
-            try:
-                from grok import beautify_message
-                email_data["body"] = await beautify_message(
-                    email_data.get("sender", ""), email_data.get("body", ""), "letter"
-                )
-            except Exception:
-                pass
+            # Тело письма — как есть, без AI-переформулирования и без обрезки
+            # (раньше здесь была beautify_message: сокращала до ~300 симв.).
             text = new_email_message(email_data)
             keyboard = task_from_message_keyboard(email_data["id"])
             sent = await send_with_retry(bot, chat_id, text, parse_mode="HTML", reply_markup=keyboard)
             # Помечаем виденным сразу — чтобы не накапливать дубли в очереди
             add_seen_message(email_data["id"])
+            _log_mail_recent(email_data)
 
     except Exception as e:
-        print(f"Scheduler mail check error: {e}")
+        print(f"Scheduler mail check error: {e!r}")
+
+
+async def check_netology_notifications_and_notify(bot, chat_id: int):
+    try:
+        from parsers.netology import fetch_netology_notifications
+        from bot.messages import new_netology_notification_message
+        from bot.keyboards import task_from_message_keyboard
+        from storage import is_seen, add_seen_message
+        notifications = await fetch_netology_notifications()
+        for notif in notifications:
+            if is_seen(notif["id"]):
+                continue
+            text = new_netology_notification_message(notif)
+            keyboard = task_from_message_keyboard(notif["id"])
+            sent = await send_with_retry(bot, chat_id, text, parse_mode="HTML", reply_markup=keyboard)
+            add_seen_message(notif["id"])
+            _log_netology_notif_recent(notif)
+    except Exception as e:
+        print(f"Netology notifications check error: {e!r}")
+
+
+async def check_gmail_and_notify(bot, chat_id: int):
+    try:
+        from parsers.mail import fetch_new_gmail_emails
+        from bot.messages import new_email_message
+        from bot.keyboards import task_from_message_keyboard
+        from storage import add_seen_message
+        emails = await fetch_new_gmail_emails()
+        for email_data in emails:
+            # Тело письма — как есть, без AI-переформулирования и без обрезки.
+            text = new_email_message(email_data)
+            keyboard = task_from_message_keyboard(email_data["id"])
+            sent = await send_with_retry(bot, chat_id, text, parse_mode="HTML", reply_markup=keyboard)
+            add_seen_message(email_data["id"])
+            _log_mail_recent(email_data)
+    except Exception as e:
+        print(f"Scheduler Gmail check error: {e!r}")
+
+
+def _log_recent(file: str, entry: dict, hours: int = 48, keep_last: int = 30):
+    """Короткая запись о входящем сообщении (почта/мессенджер/ВК) — наставник
+    читает это в своих чек-инах, чтобы знать, что приходило, даже если сам
+    форвард в Telegram давно проскроллен и не был прочитан вовремя.
+
+    file_lock — некоторые из этих файлов пишутся более чем одним джобом
+    (grades_recent.json — и check_grades_and_notify, и check_lms_grades_and_notify;
+    tasks_added_recent.json — sync_all_tasks запускается и по интервалу, и из
+    брифингов, и отдельной таской на старте), так что конкурентный
+    read-modify-write без лока мог потерять чужую запись."""
+    with file_lock(file):
+        try:
+            with open(file) as f:
+                data = json.load(f)
+        except Exception:
+            data = []
+        entry = dict(entry)
+        entry["at"] = datetime.datetime.now(tz=UFA_TZ).isoformat()
+        data.append(entry)
+        cutoff = datetime.datetime.now(tz=UFA_TZ) - datetime.timedelta(hours=hours)
+        data = [d for d in data if _safe_parse_iso(d.get("at")) and _safe_parse_iso(d["at"]) > cutoff][-keep_last:]
+        atomic_write_json(file, data)
+
+
+def _log_mail_recent(email_data: dict):
+    # Раньше здесь не было тела письма вообще — send_noon_review видел только
+    # тему и не мог оценить, есть ли в письме что-то реально важное (2026-09-17,
+    # найдено после того, что разбор дня писал общими словами про "письма
+    # такие-то", не разобрав их содержание).
+    _log_recent("data/mail_recent.json", {
+        "subject": email_data.get("subject", ""),
+        "sender": email_data.get("sender", ""),
+        "date": email_data.get("date", ""),
+        "body": (email_data.get("body") or "")[:800],
+    })
+    # Долговременный журнал (agent_db): полное тело, без скользящего окна.
+    from agent_db import record_event
+    record_event("mail", "mail",
+                 f"{email_data.get('sender', '')}|{email_data.get('date', '')}|{email_data.get('subject', '')}",
+                 title=email_data.get("subject", ""), body=email_data.get("body") or "",
+                 sender=email_data.get("sender", ""), occurred_at=email_data.get("date") or None)
+
+
+def _log_netology_notif_recent(notif: dict):
+    _log_recent("data/netology_notif_recent.json", {
+        "title": notif.get("title", ""),
+        "program": notif.get("program_title", ""),
+        "text": (notif.get("text") or "")[:500],
+    })
+    from agent_db import record_event
+    record_event("netology_notif", "notification", str(notif.get("id") or "") or None,
+                 title=notif.get("title", ""), body=notif.get("text") or "",
+                 course=notif.get("program_title", ""))
+
+
+def _log_messenger_recent(sender: str, text: str):
+    # keep_last выше дефолта — ночной полный обход (messenger_nightly_full_sweep)
+    # может залогировать за раз десятки сообщений сразу по всем чатам.
+    _log_recent("data/messenger_recent.json", {
+        "sender": sender,
+        "text": (text or "")[:500],
+    }, keep_last=150)
+    from agent_db import record_event
+    record_event("messenger", "message", None, sender=sender, body=text or "")
+
+
+def _log_vk_recent(chat_label: str, text: str):
+    _log_recent("data/vk_recent.json", {
+        "chat_label": chat_label,
+        "text": (text or "")[:500],
+    })
+    from agent_db import record_event
+    record_event("vk", "message", None, sender=chat_label, body=text or "")
+
+
+def _log_grade_recent(grade: dict, source: str):
+    """Оценки, реально отправленные пользователю (Modeus/LMS) — читает
+    send_noon_review, чтобы включить в разбор дня."""
+    entry = {
+        "source": source,
+        "course": grade.get("course_name") or grade.get("course", ""),
+        "title": grade.get("subject_name") or grade.get("title", ""),
+        "value": grade.get("value") or grade.get("grade", ""),
+        "old_value": grade.get("old_value") or grade.get("old_grade", ""),
+    }
+    _log_recent("data/grades_recent.json", entry)
+    from agent_db import record_event
+    record_event("grade", "grade", f"{source}|{entry['course']}|{entry['title']}",
+                 title=entry["title"], course=entry["course"],
+                 body=f"оценка {entry['value']}" + (f" (было {entry['old_value']})" if entry["old_value"] else ""),
+                 meta={"value": entry["value"], "old_value": entry["old_value"], "system": source})
+
+
+def _log_task_added_recent(task: dict):
+    """Новые задачи, добавленные sync_all_tasks (уведомления о них в Telegram
+    сейчас отключены — см. комментарий выше) — читает send_noon_review."""
+    _log_recent("data/tasks_added_recent.json", {
+        "title": task.get("title", ""),
+        "course": task.get("course_name", ""),
+        "deadline": task.get("deadline", ""),
+        "source": task.get("source", ""),
+    })
+    from agent_db import record_event
+    record_event(task.get("source") or "task", "task_new", str(task.get("id") or "") or None,
+                 title=task.get("title", ""), course=task.get("course_name", ""), url=task.get("url", ""),
+                 effective_at=task.get("deadline") or None)
+
+
+def _safe_parse_iso(s):
+    try:
+        return datetime.datetime.fromisoformat(s)
+    except Exception:
+        return None
 
 
 async def check_messenger_and_notify(bot, chat_id: int):
@@ -741,21 +1380,40 @@ async def _check_messenger_and_notify_inner(bot, chat_id: int):
                 _asm(msg["id"])
             return
         for msg in messages:
-            try:
-                from grok import beautify_message
-                msg["text"] = await beautify_message(
-                    msg.get("sender", ""), msg.get("text") or msg.get("preview", ""), "messenger"
-                )
-            except Exception:
-                pass
+            # Текст сообщения — как есть, без AI-переформулирования и без обрезки.
             text = new_messenger_message(msg)
             keyboard = task_from_message_keyboard(msg["id"])
             sent = await send_with_retry(bot, chat_id, text, parse_mode="HTML", reply_markup=keyboard)
             # Помечаем виденным сразу — чтобы не накапливать дубли в очереди
             add_seen_message(msg["id"])
+            _log_messenger_recent(msg.get("sender", ""), msg.get("text") or msg.get("preview", ""))
 
     except Exception as e:
-        print(f"Scheduler messenger check error: {e}")
+        print(f"Scheduler messenger check error: {e!r}")
+
+
+async def messenger_nightly_full_sweep(bot=None, chat_id=None):
+    """Раз в сутки (00:00) читаем ВСЕ чаты Мессенджера целиком — не только
+    превью непрочитанных, как в check_messenger_and_notify. Заходим внутрь
+    каждого чата (и уже прочитанного, и ещё нет), поэтому непрочитанные могут
+    пометиться прочитанными у отправителя — сознательный компромисс ради
+    того, чтобы наставник видел полный текст (домашки, важные детали по
+    учёбе), а не только обрезанное превью. В Telegram НИЧЕГО не форвардим —
+    только логируем для наставника (data/messenger_recent.json)."""
+    if _playwright_lock.locked():
+        print("Messenger (ночной обход): Playwright занят — пропускаем")
+        return
+    async with _playwright_lock:
+        try:
+            from parsers.messenger import fetch_full_day_sweep
+            from storage import add_seen_message
+            messages = await fetch_full_day_sweep()
+            for msg in messages:
+                add_seen_message(msg["id"])
+                _log_messenger_recent(msg.get("sender", ""), msg.get("text", ""))
+            print(f"Messenger (ночной обход): залогировано {len(messages)} сообщени(й)")
+        except Exception as e:
+            print(f"Messenger nightly sweep error: {e!r}")
 
 
 # ─── Напоминания пользователя ─────────────────────────────────────────
@@ -765,8 +1423,8 @@ async def check_user_reminders(bot, chat_id: int):
     try:
         now = datetime.datetime.now(tz=UFA_TZ)
         now_h = now.hour
-        if 0 <= now_h < 9 or now_h >= 23:
-            # Тихие часы — пропускаем без изменений
+        if _in_quiet_hours(now_h):
+            # Тихие часы (22:00-08:00) — пропускаем без изменений
             # mark_sent() нельзя: уменьшает times_left и ставит next_at=сейчас+interval
             return
 
@@ -815,9 +1473,10 @@ async def check_user_reminders(bot, chat_id: int):
             next_line = ""
             if times_left_after > 0 and r.get("interval_minutes", 0) > 0:
                 next_dt = now + datetime.timedelta(minutes=r["interval_minutes"])
-                next_line = f"\n⏭ {next_dt.strftime('%d.%m %H:%M')} (×{times_left_after})"
+                from reminders import format_times_left
+                next_line = f"\n⏭ {next_dt.strftime('%d.%m %H:%M')} ({format_times_left(times_left_after)})"
             elif times_left_after == 0:
-                next_line = "\n_Это последнее напоминание_"
+                next_line = "\n_Больше не напомню — но останется в списке, пока не закроешь_"
 
             from bot.messages import _esc_md
             msg_text = (
@@ -860,40 +1519,49 @@ async def check_user_reminders(bot, chat_id: int):
                 from reminders import save_last_message_id
                 save_last_message_id(r["id"], sent.message_id)
             except Exception as e:
-                print(f"Reminder send error: {e}")
+                print(f"Reminder send error: {e!r}")
 
             mark_sent(r["id"])
 
             # Звук + Mac-уведомление + Reminders
             try:
-                import os as _os
-                _title = r.get("task_title", "Напоминание")[:50]
-                _os.system(f'afplay /System/Library/Sounds/Funk.aiff &')
-                _os.system("osascript -e 'display notification \"" + _title + "\" with title \"ДедЛайнер\" sound name \"Funk\"'")
-                _safe_title = _title
                 import subprocess as _sp
-                _sp.run(["osascript", "-e", f'tell application "Reminders" to delete (every reminder whose name is "{_safe_title}") '])
-                _sp.run(["osascript", "-e", f'tell application "Reminders" to make new reminder with properties {{name:"{_safe_title}", due date:current date}}'])
+                _title = r.get("task_title", "Напоминание")[:50]
+                # Заголовок вводит сам пользователь — кавычки/бэкслеши ломали
+                # AppleScript-строку (тихий сбой всей секции), экранируем.
+                _safe_title = _title.replace("\\", "\\\\").replace('"', '\\"')
+                _sp.Popen(["afplay", "/System/Library/Sounds/Funk.aiff"])
+
+                def _run_osascript(script: str):
+                    # osascript может зависнуть навсегда (например TCC-промпт на
+                    # управление "Напоминаниями" ждёт клика, которого никто не
+                    # сделает) — вызов синхронный, поэтому его нельзя делать
+                    # напрямую в async-функции: он заблокирует ВЕСЬ event loop
+                    # и остановит остальные джобы и ответы бота. Уносим в поток
+                    # с жёстким таймаутом.
+                    _sp.run(["osascript", "-e", script], timeout=10)
+
+                await asyncio.to_thread(
+                    _run_osascript,
+                    f'display notification "{_safe_title}" with title "ДедЛайнер" sound name "Funk"',
+                )
+                await asyncio.to_thread(
+                    _run_osascript,
+                    f'tell application "Reminders" to delete (every reminder whose name is "{_safe_title}")',
+                )
+                await asyncio.to_thread(
+                    _run_osascript,
+                    f'tell application "Reminders" to make new reminder with properties {{name:"{_safe_title}", due date:current date}}',
+                )
             except Exception:
                 pass
 
-            # Удаляем reminder_only задачу если это было последнее срабатывание
-            # Проверяем times_left ПОСЛЕ mark_sent (уже декрементировано)
-            if task_obj and task_obj.get("source") == "reminder_only":
-                from reminders import get_all_reminders as _get_active
-                still_active = any(
-                    str(rem.get("task_id")) == str(task_id)
-                    for rem in _get_active()
-                )
-                if not still_active:
-                    from storage import get_tasks, save_tasks as _save_tasks
-                    _all = get_tasks()
-                    _all = [t for t in _all if str(t["id"]) != str(task_id)]
-                    _save_tasks(_all)
-                    print(f"Reminder: reminder_only задача {task_id} удалена после последнего срабатывания")
+            # После последнего срабатывания reminder_only-задача больше НЕ
+            # удаляется: напоминание остаётся (exhausted) в боте и на столе,
+            # пока пользователь сам его не закроет — см. reminders.mark_sent.
 
     except Exception as e:
-        print(f"Scheduler user reminders error: {e}")
+        print(f"Scheduler user reminders error: {e!r}")
 
 
 # ─── Рандомные мотивационные ─────────────────────────────────────────
@@ -920,55 +1588,80 @@ def _save_sent_lesson_reminders(sent: set):
         json.dump({"date": today, "sent": list(sent)}, f)
 
 
+LESSON_NOTICE_LEADS = (60, 15)      # за сколько минут до начала предупреждать
+LESSON_NOTICE_CATCHUP_MIN = 10      # если бот проспал момент — догоняем в этом окне
+
+
+def _lesson_lines_today() -> list:
+    """Пары/вебинары на сегодня — РОВНО те же строки, что в окне наставника на
+    столе (scripts/mentor_dashboard.build_schedule): Modeus + Нетология, две
+    пары одной записью разбиты по слотам, ссылки на вебинары, VK-сводка если
+    она на сегодня. Раньше здесь был отдельный живой запрос только в Modeus
+    раз в 5 минут — вебинары Нетологии в уведомления не попадали вовсе."""
+    import sys as _sys
+    _scripts = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
+    if _scripts not in _sys.path:
+        _sys.path.insert(0, _scripts)
+    from mentor_dashboard import build_schedule
+    today = datetime.datetime.now(tz=UFA_TZ).date()
+    return [l for l in build_schedule(today)["lines"] if l.get("start")]
+
+
 async def check_lesson_reminders(bot, chat_id: int):
-    """Каждые 5 минут — проверяем не начнётся ли пара через ~15 минут."""
+    """Раз в 2 минуты: уведомление о паре за 60 и за 15 минут до начала —
+    в Telegram и системным уведомлением macOS. Асинхронные LXP-пункты (без
+    времени) не трогаем. Тихие часы игнорируем сознательно: уведомление
+    имеет смысл только сейчас, а не утренней доставкой из очереди (пара в
+    08:30 → предупреждение в 07:30)."""
     try:
-        from parsers.modeus import fetch_schedule_today
-
         now = datetime.datetime.now(tz=UFA_TZ)
-        if now.hour < 7 or now.hour >= 22:
+        lines = await asyncio.to_thread(_lesson_lines_today)
+        if not lines:
             return
-
-        schedule = await asyncio.wait_for(fetch_schedule_today(), timeout=15)
-        if not schedule:
-            return
-
         sent = _load_sent_lesson_reminders()
 
-        for lesson in schedule:
-            try:
-                start_dt = datetime.datetime.fromisoformat(lesson["start"])
-                if start_dt.tzinfo is None:
-                    start_dt = start_dt.replace(tzinfo=UFA_TZ)
-
-                minutes_until = (start_dt - now).total_seconds() / 60
-
-                if not (13 <= minutes_until <= 17):
+        for lesson in lines:
+            start_dt = lesson["start"]
+            minutes_until = (start_dt - now).total_seconds() / 60
+            for lead in LESSON_NOTICE_LEADS:
+                if not (lead - LESSON_NOTICE_CATCHUP_MIN < minutes_until <= lead):
                     continue
-
-                lesson_key = lesson.get("id") or lesson.get("start", "")
-                if str(lesson_key) in sent:
+                key = f"{start_dt.isoformat()}|{lesson['label']}|{lead}"
+                if key in sent:
                     continue
-
-                from bot.messages import _esc_md
-                name = _esc_md(lesson.get("course_name") or lesson.get("name", "Занятие"))
-                location = _esc_md(lesson.get("location", ""))
-                start_str = start_dt.strftime("%H:%M")
-
-                text = f"🔔 *Modeus*\n\n🔔 *Пара через 15 минут!*\n{'─' * 20}\n📚 {name}\n🕐 Начало: {start_str}"
-                if location:
-                    text += f"\n📍 {location}"
-
-                await send_with_retry(bot, chat_id, text)
-                sent.add(str(lesson_key))
+                from html import escape as _h
+                when = "через час" if lead == 60 else "через 15 минут"
+                text = (
+                    f"⏰ <b>Пара {when}</b> — в {start_dt.strftime('%H:%M')}\n"
+                    f"📚 {_h(lesson['label'])}"
+                )
+                if lesson.get("url"):
+                    text += f'\n🔗 <a href="{_h(lesson["url"])}">Ссылка на занятие</a>'
+                try:
+                    await send_with_retry(bot, chat_id, text, parse_mode="HTML",
+                                          ignore_quiet_hours=True, disable_web_page_preview=True)
+                except Exception as e:
+                    print(f"Scheduler lesson reminder send error: {e!r}")
+                    continue
+                sent.add(key)
                 _save_sent_lesson_reminders(sent)
-                print(f"Scheduler: напоминание о паре \'{name}\' в {start_str}")
+                print(f"Scheduler: напоминание о паре ({lead} мин): {lesson['label'][:50]} в {start_dt.strftime('%H:%M')}")
 
-            except Exception as e:
-                print(f"Scheduler lesson reminder error for lesson: {e}")
-
+                try:
+                    import subprocess as _sp
+                    _t = f"Пара {when} — {start_dt.strftime('%H:%M')}"
+                    _b = lesson["label"][:120]
+                    _t = _t.replace("\\", "\\\\").replace('"', '\\"')
+                    _b = _b.replace("\\", "\\\\").replace('"', '\\"')
+                    await asyncio.to_thread(
+                        _sp.run,
+                        ["osascript", "-e", f'display notification "{_b}" with title "{_t}" sound name "Glass"'],
+                        timeout=10, capture_output=True,
+                    )
+                except Exception:
+                    pass
     except Exception as e:
-        print(f"Scheduler lesson reminder error: {e}")
+        print(f"Scheduler lesson reminder error: {e!r}")
 
 
 def _generate_random_times() -> list[str]:
@@ -1074,7 +1767,7 @@ async def check_random_reminder(bot, chat_id: int):
             _save_random_schedule(schedule)
             print(f"Scheduler: мотивация отправлена в {motivation_time}")
     except Exception as e:
-        print(f"Scheduler random reminder error: {e}")
+        print(f"Scheduler random reminder error: {e!r}")
 
 
 async def _send_random_motivation(bot, chat_id: int):
@@ -1141,7 +1834,7 @@ async def _send_random_motivation(bot, chat_id: int):
 
         await send_with_retry(bot, chat_id, "\n".join(lines), parse_mode="Markdown")
     except Exception as e:
-        print(f"Scheduler random motivation error: {e}")
+        print(f"Scheduler random motivation error: {e!r}")
 async def send_weekly_report(bot, chat_id: int):
     try:
         from grok import ask_grok
@@ -1192,7 +1885,7 @@ async def send_weekly_report(bot, chat_id: int):
             await send_with_retry(bot, chat_id, f"🤖 {grok_text}")
 
     except Exception as e:
-        print(f"Scheduler weekly report error: {e}")
+        print(f"Scheduler weekly report error: {e!r}")
 
 
 # ─── Главные задачи планировщика ─────────────────────────────────────
@@ -1328,11 +2021,9 @@ async def _fetch_yandex_weather() -> str:
         result = "\n".join(out)
         print(f"Yandex weather OK: {result[:80]}")
         return result
-        print(f"Yandex weather OK: {result[:80]}")
-        return result
 
     except Exception as e:
-        print(f"Yandex weather error: {e}")
+        print(f"Yandex weather error: {e!r}")
         import traceback; traceback.print_exc()
         return ""
 
@@ -1345,7 +2036,7 @@ async def _fetch_weather() -> str:
             if ya:
                 return ya
         except Exception as e:
-            print(f"_fetch_weather: попытка {attempt+1} упала: {e}")
+            print(f"_fetch_weather: попытка {attempt+1} упала: {e!r}")
         if attempt == 0:
             await asyncio.sleep(3)
     # Fallback
@@ -1355,7 +2046,7 @@ async def _fetch_weather() -> str:
             print("Weather: используем Open-Meteo fallback")
             return om
     except Exception as e:
-        print(f"_fetch_weather fallback error: {e}")
+        print(f"_fetch_weather fallback error: {e!r}")
     return ""
 
 
@@ -1431,7 +2122,7 @@ async def _fetch_weather_openmeteo() -> str:
         return "\n".join(out)
 
     except Exception as e:
-        print(f"Weather fetch error: {e}")
+        print(f"Weather fetch error: {e!r}")
         return ""
 MORNING_SENT_FILE = "data/morning_sent.json"
 
@@ -1481,7 +2172,7 @@ async def send_morning_briefing(bot, chat_id: int):
         print("Scheduler: утренний брифинг 9:00...")
         await sync_all_tasks()
         from grok import ask_grok
-        from bot.messages import _expand_and_sort, _lesson_emoji, _s, _short_course
+        from bot.messages import _expand_and_sort, _lesson_emoji, _s, _short_course, _esc_md
         schedule = await _retry(_fetch_schedule_fresh_or_cache) or []
         tasks = get_pending_tasks()
         now = datetime.datetime.now(tz=UFA_TZ)
@@ -1505,11 +2196,12 @@ async def send_morning_briefing(bot, chat_id: int):
         if schedule:
             lines.append(f"*📅 ПАРЫ СЕГОДНЯ*")
             lines.append(SEP)
+            from bot.messages import lxp_tag
             for lesson in _expand_and_sort(schedule):
                 emoji = _lesson_emoji(lesson)
                 name = _s(lesson.get("course_name")) or _s(lesson.get("name"))
                 start_t = _s(lesson.get("start_time"))
-                lines.append(f"{emoji}  {start_t}  {name}")
+                lines.append(f"{emoji}  {start_t}  {name}{lxp_tag(lesson)}")
         else:
             lines.append("📅 Пар сегодня нет 🎉")
         lines.append("")
@@ -1527,6 +2219,7 @@ async def send_morning_briefing(bot, chat_id: int):
             except Exception:
                 continue
         urgent.sort(key=lambda x: x[0])
+        DAYS_SHORT = ["пн","вт","ср","чт","пт","сб","вс"]
 
         overdue = [(d, t) for d, t in urgent if d < 0]
         upcoming = [(d, t) for d, t in urgent if d >= 0]
@@ -1545,7 +2238,6 @@ async def send_morning_briefing(bot, chat_id: int):
             lines.append(SEP)
             seen_titles = set()
             shown = 0
-            DAYS_SHORT = ["пн","вт","ср","чт","пт","сб","вс"]
             for days, t in upcoming:
                 title = t.get("title", "")
                 if title in seen_titles:
@@ -1590,9 +2282,27 @@ async def send_morning_briefing(bot, chat_id: int):
         else:
             lines.append("✅ Все задания выполнены!")
 
-        if overdue:
+        # Просроченное — не старше 2 недель (более старое явно уже неактуально,
+        # не стоит пугать древними хвостами), самые просроченные — первыми.
+        overdue_recent = sorted([(d, t) for d, t in overdue if d >= -14], key=lambda x: x[0])
+        if overdue_recent:
             lines.append("")
-            lines.append(f"⚠️ Просрочено: {len(overdue)}")
+            lines.append(f"*⚠️ ПРОСРОЧЕНО ({len(overdue_recent)})*")
+            lines.append(SEP)
+            for days, t in overdue_recent[:3]:
+                title = t.get("title", "")
+                if len(title) > 40:
+                    title = title[:37] + "…"
+                try:
+                    dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
+                    date_str = f"{dt.strftime('%d.%m')} {DAYS_SHORT[dt.weekday()]}"
+                except Exception:
+                    date_str = ""
+                course = _short_course(t.get("course_name", ""))
+                prefix = f"{course} — " if course else ""
+                lines.append(f"❗️  {date_str}  —  {prefix}{_esc_md(title)}")
+            if len(overdue_recent) > 3:
+                lines.append(f"  _...и ещё {len(overdue_recent) - 3}_")
         # Цитата из файла
         _quote = _get_quote()
         if _quote:
@@ -1601,7 +2311,135 @@ async def send_morning_briefing(bot, chat_id: int):
         await send_with_retry(bot, chat_id, "\n".join(lines))
         _mark_morning_sent()
     except Exception as e:
-        print(f"Scheduler morning briefing error: {e}")
+        print(f"Scheduler morning briefing error: {e!r}")
+
+
+def _load_recent_since(path: str, since: datetime.datetime) -> list:
+    """Читает data/*_recent.json (их наполняют check_mail_and_notify,
+    check_messenger_and_notify, check_vk_and_notify, check_netology_notifications_and_notify
+    при каждом форварде) и отдаёт только записи с "at" не раньше since."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    out = []
+    for e in data:
+        at = _safe_parse_iso(e.get("at"))
+        if at and at >= since:
+            out.append(e)
+    return out
+
+
+async def send_noon_review(bot, chat_id: int):
+    """12:00 — разбор того, что пришло с утра (почта/мессенджер/ВК/Нетология):
+    не упустил ли что-то важное. В отличие от send_morning_briefing (смотрит
+    вперёд на день) эта сводка смотрит назад — на то, что уже реально пришло
+    и было переслано отдельными сообщениями, но легко потерялось в потоке."""
+    if _is_noon_sent():
+        print("Scheduler: разбор дня (12:00) уже был сегодня — пропускаем")
+        return
+    try:
+        print("Scheduler: разбор дня 12:00...")
+        today_start = datetime.datetime.now(tz=UFA_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        mail = _load_recent_since("data/mail_recent.json", today_start)
+        messenger = _load_recent_since("data/messenger_recent.json", today_start)
+        vk = _load_recent_since("data/vk_recent.json", today_start)
+        netology_notif = _load_recent_since("data/netology_notif_recent.json", today_start)
+        grades = _load_recent_since("data/grades_recent.json", today_start)
+        new_tasks = _load_recent_since("data/tasks_added_recent.json", today_start)
+
+        now = datetime.datetime.now(tz=UFA_TZ)
+        SEP = "┄" * 20
+        header = f"🕛 *Разбор дня, {USER_NAME}*\n{DAYS_RU[now.weekday()].capitalize()}, {now.day} {MONTHS_RU[now.month-1]}\n"
+
+        if not (mail or messenger or vk or netology_notif or grades or new_tasks):
+            text = f"{header}\n{SEP}\nЗа утро ничего нового не приходило — почта, мессенджер, ВК, Нетология, оценки и задания молчат.\n{SEP}"
+            await send_with_retry(bot, chat_id, text)
+            _mark_noon_sent()
+            return
+
+        parts = []
+        if mail:
+            parts.append("Почта (с текстом письма, не только тема):\n" + "\n\n".join(
+                f"От {e.get('sender', '')}, тема «{e.get('subject', '')}»:\n{(e.get('body') or '')[:600]}"
+                for e in mail
+            ))
+        if messenger:
+            parts.append("Мессенджер:\n" + "\n".join(
+                f"- {e.get('sender', '')}: {(e.get('text') or '')[:400]}" for e in messenger
+            ))
+        if vk:
+            parts.append("ВКонтакте:\n" + "\n".join(
+                f"- {e.get('chat_label', '')}: {(e.get('text') or '')[:400]}" for e in vk
+            ))
+        if netology_notif:
+            parts.append("Нетология (уведомления, с текстом):\n" + "\n\n".join(
+                f"«{e.get('title', '')}»:\n{(e.get('text') or '')[:500]}" for e in netology_notif
+            ))
+        if grades:
+            parts.append("Новые оценки:\n" + "\n".join(
+                f"- [{e.get('source','')}] {e.get('course','')} — {e.get('title','')}: "
+                f"{(str(e.get('old_value')) + ' → ') if e.get('old_value') else ''}{e.get('value','')}"
+                for e in grades
+            ))
+        if new_tasks:
+            parts.append("Новые задания:\n" + "\n".join(
+                f"- {e.get('course','')} — {e.get('title','')}"
+                + (f" (дедлайн {e.get('deadline','')[:10]})" if e.get("deadline") else "")
+                for e in new_tasks
+            ))
+        raw = "\n\n".join(parts)
+
+        memory_recap = get_ai_memory_recap()
+        prompt = (
+            (f"{memory_recap}\n\n" if memory_recap else "") +
+            "Вот всё, что пришло студенту с утра — почта/мессенджер/ВК/Нетология, "
+            "плюс новые оценки и новые задания за это же время (само содержание "
+            "уже переслано отдельными сообщениями раньше — здесь только сводка "
+            "для разбора):\n\n"
+            f"{raw}\n\n"
+            "Проверь, нет ли среди этого чего-то важного, что легко пропустить в потоке "
+            "(письма от преподавателей/деканата, реальные изменения в расписании, "
+            "срочные вопросы, тревожные оценки, новые задания с близким дедлайном). "
+            "Если всё рутинное — так и скажи коротко, не выдумывай важность. Ответь "
+            "связным текстом 2-4 предложения, по-русски, без markdown-разметки и без "
+            "списка, без вступлений."
+        )
+        try:
+            review = await _ask_claude_cli(prompt, timeout=60)
+        except Exception as e:
+            review = ""
+            print(f"Noon review error: {e!r}")
+
+        body = review if review else "Не удалось получить разбор — глянь форварды выше вручную."
+        if review:
+            await record_ai_memory("noon", review)
+
+        stats = []
+        if mail:
+            stats.append(f"{len(mail)} писем")
+        if messenger:
+            stats.append(f"{len(messenger)} сообщений")
+        if vk:
+            stats.append(f"{len(vk)} в ВК")
+        if netology_notif:
+            stats.append(f"{len(netology_notif)} уведомлений")
+        if grades:
+            stats.append(f"{len(grades)} оценок")
+        if new_tasks:
+            stats.append(f"{len(new_tasks)} заданий")
+        stats_line = f"\n{SEP}\n📊 За утро: {' · '.join(stats)}" if stats else ""
+
+        text = f"{header}\n{SEP}\n{body}{stats_line}"
+
+        await send_with_retry(bot, chat_id, text)
+        _mark_noon_sent()
+    except Exception as e:
+        print(f"Scheduler noon review error: {e!r}")
+
+
 async def send_midday_briefing(bot, chat_id: int):
     """14:00 — дневная сводка."""
     if _is_midday_sent():
@@ -1610,7 +2448,6 @@ async def send_midday_briefing(bot, chat_id: int):
     try:
         print("Scheduler: дневной брифинг 14:00...")
         await sync_all_tasks()
-        from grok import ask_grok
         from bot.messages import _lesson_emoji, _s, _short_course
 
         tasks = get_pending_tasks()
@@ -1631,63 +2468,68 @@ async def send_midday_briefing(bot, chat_id: int):
         if schedule:
             lines.append(f"*📅 ПАРЫ СЕГОДНЯ*")
             lines.append(SEP)
+            from bot.messages import lxp_tag
             for lesson in _expand_and_sort(schedule):
                 emoji = _lesson_emoji(lesson)
                 name = _s(lesson.get("course_name")) or _s(lesson.get("name"))
                 start_t = _s(lesson.get("start_time"))
-                lines.append(f"{emoji}  {start_t}  {name}")
+                lines.append(f"{emoji}  {start_t}  {name}{lxp_tag(lesson)}")
             lines.append("")
         else:
             lines.append("📅 Пар сегодня нет 🎉")
             lines.append("")
 
-        # Ближайшая задача + мотивация от ИИ (только будущие, не просрочка)
-        nearest = sorted(
-            [t for t in tasks if t.get("deadline") and not t.get("done")
-             and datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ) >= now],
-            key=lambda x: x["deadline"]
-        )
-        if nearest:
-            t = nearest[0]
-            from bot.messages import _short_course, _esc_md
-            course = _short_course(t.get("course_name", ""))
-            title = t.get("title", "")
-            if len(title) > 40:
-                title = title[:37] + "…"
-            title = _esc_md(title)
-            _days_short = ["пн","вт","ср","чт","пт","сб","вс"]
+        # Все просроченные — разбор от Claude: что из этого реально горит
+        # и нужно закрыть быстрее всего (не формальный список всех подряд).
+        overdue = []
+        for t in tasks:
+            if not t.get("deadline"):
+                continue
             try:
                 dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
                 days = (dt - now).days
-                if days == 0:
-                    when = "сегодня"
-                elif days == 1:
-                    when = "завтра"
-                else:
-                    when = f"через {days} дн."
-                date_str = f"{dt.strftime('%d.%m')} {_days_short[dt.weekday()]}"
+                if days < 0:
+                    overdue.append((days, t))
             except Exception:
-                when = ""
-                date_str = ""
-            lines.append(f"*📌 ЗАДАЧА ДНЯ*")
+                continue
+        overdue.sort(key=lambda x: x[0])
+
+        if overdue:
+            lines.append("*⚠️ ПРОСРОЧЕНО — РАЗБОР*")
             lines.append(SEP)
-            lines.append(f"❗️  {date_str}  —  {course} — {title}")
-            lines.append("")
-            lines.append("")
+            overdue_lines = "\n".join(
+                f"- {_short_course(t.get('course_name',''))} — {t.get('title','')} "
+                f"(просрочено {-d} дн.)"
+                for d, t in overdue
+            )
+            memory_recap = get_ai_memory_recap()
+            knowledge_facts = get_relevant_knowledge_facts([t.get("course_name", "") for _, t in overdue])
+            prompt = (
+                (f"{memory_recap}\n\n" if memory_recap else "") +
+                (f"{knowledge_facts}\n\n" if knowledge_facts else "") +
+                f"Вот все просроченные учебные задачи студента (не сделано, дедлайн прошёл):\n\n"
+                f"{overdue_lines}\n\n"
+                "Выбери из них то, что реально важно закрыть как можно быстрее (зачётные/итоговые "
+                "работы, тесты с большим весом, то что блокирует другие темы) — а не формальные "
+                "необязательные домашки. Если выше есть организационные факты с вебинаров по этим "
+                "предметам (например про формат сдачи, вес балла, мягкость срока) — учти их при "
+                "оценке важности, но не выдумывай того, чего там нет. Ответь связным текстом в "
+                "2-3 предложения (НЕ список, НЕ нумерация, без markdown-разметки и звёздочек — "
+                "только обычные слова и знаки препинания), по-русски, без вступлений типа 'вот "
+                "разбор'. Прямо суть — что горит сильнее всего и почему, остальное можно не "
+                "упоминать вообще."
+            )
             try:
-                prompt = (
-                    f"Задача студента {USER_NAME}: {course} — {title}, дедлайн {when}. "
-                    f"Напиши 2 предложения — короткую мотивацию закрыть именно эту задачу сегодня. "
-                    f"Конкретно, без воды, по-русски. Можно с юмором."
-                )
-                motivation = await ask_grok(prompt)
-                if motivation:
-                    lines.append(f"💪 {motivation}")
-                    lines.append("")
+                review = await _ask_claude_cli(prompt, timeout=60)
             except Exception as e:
-                print(f"Midday motivation error: {e}")
+                review = ""
+                print(f"Midday overdue review error: {e!r}")
+            lines.append(review if review else f"Просроченных задач: {len(overdue)} — не удалось получить разбор, см. /tasks")
+            lines.append("")
+            if review:
+                await record_ai_memory("midday", review)
         else:
-            lines.append("✅ Активных задач нет")
+            lines.append("✅ Просроченных задач нет")
             lines.append("")
 
         # Цитата из файла
@@ -1700,36 +2542,31 @@ async def send_midday_briefing(bot, chat_id: int):
         _mark_midday_sent()
 
     except Exception as e:
-        print(f"Scheduler midday briefing error: {e}")
+        print(f"Scheduler midday briefing error: {e!r}")
 
 
-# ─── Вечерний брифинг 21:00 (новый) ──────────────────────────────────
+# ─── Вечерний брифинг 22:00 ───────────────────────────────────────────
 
 async def send_evening_briefing(bot, chat_id: int):
-    """21:00 — вечерний брифинг + итоги дня объединённые."""
+    """22:00 — итоги дня (пары сегодня + сделано задач), весёлая мотивация
+    от Claude на завтра, расписание на завтра. Отправляется на границе
+    тихих часов (22:00-08:00) — намеренно с ignore_quiet_hours=True."""
     if _is_evening_sent():
         print("Scheduler: вечерний брифинг уже был сегодня — пропускаем")
         return
     try:
-        print("Scheduler: вечерний брифинг 21:00...")
+        print("Scheduler: вечерний брифинг 22:00...")
         await sync_all_tasks()
-        from grok import ask_grok
-        from bot.messages import _lesson_emoji, _s, _short_course
+        from bot.messages import _lesson_emoji, _s
 
         now = datetime.datetime.now(tz=UFA_TZ)
         today = now.date()
         tomorrow = (now + datetime.timedelta(days=1)).date()
-        after_tomorrow = (now + datetime.timedelta(days=2)).date()
         tom_str = f"{tomorrow.day} {MONTHS_RU[tomorrow.month-1]}, {DAYS_RU[tomorrow.weekday()]}"
 
-        # Расписание завтра
         schedule_tomorrow = await _fetch_tomorrow_schedule()
 
-        # Все задачи
         all_tasks = get_tasks()
-        pending = [t for t in all_tasks if not t.get("done") and t.get("source") != "reminder_only"]
-
-        # Выполненные сегодня
         done_today = []
         for t in all_tasks:
             if not t.get("done"):
@@ -1743,207 +2580,75 @@ async def send_evening_briefing(bot, chat_id: int):
                 except Exception:
                     pass
 
-        # Все пары сегодня
         schedule_today = await _retry(_fetch_schedule_fresh_or_cache) or []
         passed_today = schedule_today
+        pending = [t for t in all_tasks if not t.get("done") and t.get("source") != "reminder_only"]
 
-        # 3 ближайших актуальных задачи (только days >= 0)
-        _seen_titles = set()
-        upcoming_tasks = []
-        for t in sorted([t for t in pending if t.get("deadline")], key=lambda x: x["deadline"]):
-            try:
-                d = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
-                days_left = (d - now).days
-                if days_left < 0:
-                    continue
-                _title = t.get("title", "")
-                if _title not in _seen_titles:
-                    _seen_titles.add(_title)
-                    upcoming_tasks.append((days_left, t))
-            except Exception:
-                continue
-
-        # Записываем статистику
+        # Статистика — тихая запись, не отображается в самом сообщении
         record_daily_stats(len(done_today), len(pending), len(passed_today))
 
         SEP = "┄" * 20
-        border = "═" * 26
-        pad = "   "
         lines = [
             f"🌙 *Добрый вечер, {USER_NAME}!*",
             f"{now.day} {MONTHS_RU[now.month-1]}, {DAYS_RU[now.weekday()]}",
             "",
         ]
 
-        # Итоги дня
+        # Итоги дня — пары сегодня + сделано задач
         lines.append("*📊 ИТОГИ ДНЯ*")
         lines.append(SEP)
+        from bot.messages import lxp_tag, _expand_and_sort
         if passed_today:
-            for l in passed_today:
+            # _expand_and_sort — как в утреннем/дневном: если Modeus отдал одну
+            # запись на пару, растянутую на 2 слота, покажем её двумя строками,
+            # а не одной (раньше здесь и в "завтра" ниже этого не было).
+            for l in _expand_and_sort(passed_today):
                 name = _s(l.get("course_name")) or _s(l.get("name", ""))
                 start = _s(l.get("start_time"))
-                lines.append(f"🎓  {start}  {name}")
+                lines.append(f"🎓  {start}  {name}{lxp_tag(l)}")
         else:
             lines.append("Пар сегодня не было")
         lines.append("")
         lines.append(f"✅ Выполнено задач: {len(done_today)}")
-        lines.append(f"📋 Осталось: {len(pending)}")
         lines.append("")
+
+        # Весёлая мотивация от Claude на завтра
+        tomorrow_str_for_ai = ", ".join(
+            (_s(l.get("course_name")) or _s(l.get("name", "")))[:30] for l in schedule_tomorrow
+        ) if schedule_tomorrow else "пар нет"
+        memory_recap = get_ai_memory_recap()
+        prompt = (
+            (f"{memory_recap}\n\n" if memory_recap else "") +
+            f"Заверши день {USER_NAME}а весёлым, тёплым напутствием на завтра ({tom_str}). "
+            f"Сегодня выполнено задач: {len(done_today)}. Завтра по расписанию: {tomorrow_str_for_ai}. "
+            "2-3 предложения, с лёгким юмором, по-русски, без пафоса и без нотаций. Только текст."
+        )
+        try:
+            motivation = await _ask_claude_cli(prompt, timeout=60, model="claude-sonnet-5")
+        except Exception as e:
+            motivation = ""
+            print(f"Evening motivation error: {e!r}")
+        if motivation:
+            lines.append(f"💬 {motivation}")
+            lines.append("")
+            await record_ai_memory("evening", motivation)
 
         # Расписание завтра
         lines.append(f"*📅 ЗАВТРА — {tom_str.upper()}*")
         lines.append(SEP)
         if schedule_tomorrow:
-            for lesson in schedule_tomorrow:
+            for lesson in _expand_and_sort(schedule_tomorrow):
                 emoji = _lesson_emoji(lesson)
                 name = _s(lesson.get("course_name")) or _s(lesson.get("name"))
                 start = _s(lesson.get("start_time"))
-                lines.append(f"{emoji}  {start}  {name}")
+                lines.append(f"{emoji}  {start}  {name}{lxp_tag(lesson)}")
         else:
             lines.append("  Пар нет 🎉")
-        lines.append("")
 
-        _days_short = ["пн","вт","ср","чт","пт","сб","вс"]
-        # Закрой до сна — самая ближайшая задача
-        if upcoming_tasks:
-            days_left, t = upcoming_tasks[0]
-            from bot.messages import _short_course, _esc_md
-            course = _short_course(t.get("course_name", ""))
-            title = t.get("title", "")
-            if len(title) > 40:
-                title = title[:37] + "…"
-            title = _esc_md(title)
-            try:
-                dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
-                date_str = f"{dt.strftime('%d.%m')} {_days_short[dt.weekday()]}"
-            except Exception:
-                date_str = ""
-            prefix = f"{course} — " if course else ""
-            lines.append("🎯 *Закрой до сна:*")
-            lines.append(f"  ❗️  {date_str}  —  {prefix}{title}")
-            lines.append("")
-
-        # 3 ближайших задачи
-        if len(upcoming_tasks) > 1:
-            lines.append("📌 *Ближайшие задачи:*")
-            for days_left, t in upcoming_tasks[1:4]:
-                from bot.messages import _short_course, _esc_md
-                course = _short_course(t.get("course_name", ""))
-                title = t.get("title", "")
-                if len(title) > 40:
-                    title = title[:37] + "…"
-                title = _esc_md(title)
-                try:
-                    dt = datetime.datetime.fromisoformat(t["deadline"]).astimezone(UFA_TZ)
-                    date_str = f"{dt.strftime('%d.%m')} {_days_short[dt.weekday()]}"
-                except Exception:
-                    date_str = ""
-                prefix = f"{course} — " if course else ""
-                lines.append(f"  • ❗️  {date_str}  —  {prefix}{title}")
-            lines.append("")
-
-        # Groq анализ — умный, контекстный, каждый день разный
-        try:
-            import random as _rand
-            pairs_str = ", ".join(
-                (_s(l.get("course_name")) or _s(l.get("name", "")))[:20]
-                for l in passed_today[:3]
-            ) if passed_today else "пар не было"
-            done_str = ", ".join(t["title"][:20] for t in done_today[:3]) if done_today else "ничего"
-            week_summary = get_stats_summary()
-            avg = get_weekly_done_avg()
-
-            # Определяем паттерн по истории — что реально происходит
-            _stats = _load_daily_stats()
-            _today_key = now.date().isoformat()
-            _last7 = []
-            for _i in range(1, 8):
-                _d = (now.date() - datetime.timedelta(days=_i)).isoformat()
-                if _d in _stats:
-                    _last7.append(_stats[_d].get("done", 0))
-            _zeros_streak = 0
-            for _v in _last7:
-                if _v == 0:
-                    _zeros_streak += 1
-                else:
-                    break
-            _today_done = len(done_today)
-            _yesterday_done = _last7[0] if _last7 else 0
-            _prev_done = _last7[1] if len(_last7) > 1 else 0
-
-            # Ближайший дедлайн для контекста
-            _next_deadline = ""
-            if upcoming_tasks:
-                _dl_days, _dl_task = upcoming_tasks[0]
-                _dl_title = _dl_task.get("title", "")[:30]
-                _next_deadline = f"Ближайший дедлайн через {_dl_days} дн.: {_dl_title}"
-
-            # Выбираем стиль в зависимости от ситуации
-            if _zeros_streak >= 3 and _today_done == 0:
-                # 3+ дня подряд ничего — честный разговор
-                _style = "честный друг который замечает что человек уже несколько дней ничего не делает и говорит об этом прямо, без нотаций, но конкретно"
-            elif _today_done == 0 and _yesterday_done == 0:
-                # Два дня подряд ноль
-                _style = "саркастичный но добрый друг — замечает второй день тишины, подкалывает но не обидно"
-            elif _today_done > 0 and _yesterday_done == 0 and _zeros_streak >= 1:
-                # После нуля наконец что-то сделал
-                _style = "искренне рад за человека — после нескольких дней тишины наконец сдвинулся, отмечает это"
-            elif _today_done >= 3:
-                # Продуктивный день
-                _style = "аналитик который отмечает реально продуктивный день, сравнивает с предыдущими, говорит что это редкость или норма"
-            elif _today_done > _yesterday_done and _yesterday_done > 0:
-                # Растёт динамика
-                _style = "коуч который видит положительную динамику и предлагает конкретно что сделать завтра чтобы не потерять темп"
-            elif len(pending) > 20:
-                # Много накопилось
-                _style = "трезвый аналитик который говорит сколько накопилось и что надо приоритизировать — без паники но с конкретикой"
-            else:
-                # Обычный день — ротация стилей
-                _style = _rand.choice([
-                    "зеркало — просто отражает факты без оценок, коротко и по делу",
-                    "мотиватор — заряжает на завтра одной конкретной идеей",
-                    "аналитик — смотрит на тренд недели и делает вывод",
-                    "коуч — даёт один конкретный совет на завтра исходя из данных",
-                ])
-
-            prompt = (
-                f"Ты — {_style}.\n\n"
-                f"Данные студента {USER_NAME} (1 курс ИСиТ, направление: информационные системы):\n"
-                f"Сегодня: пары — {pairs_str}, выполнено задач — {_today_done} ({done_str}), осталось — {len(pending)}\n"
-                f"Вчера выполнено: {_yesterday_done}, позавчера: {_prev_done}\n"
-                f"Подряд дней без задач: {_zeros_streak}\n"
-                f"Среднее за неделю: {avg} задач/день\n"
-                f"История 7 дней:\n{week_summary}\n"
-                f"{_next_deadline}\n\n"
-                f"Напиши 2-3 предложения. Говори напрямую к {USER_NAME}. "
-                f"Никаких шаблонных фраз типа 'молодец' или 'так держать'. "
-                f"Никаких скобок и пояснений. Только русские слова. Только текст."
-            )
-            analysis = await ask_grok(prompt, smart=True)
-            if analysis:
-                lines.append(f"{'─' * 20}\n🤖 {analysis}")
-        except Exception as e:
-            print(f"Groq evening analysis error: {e}")
-
-        # IT новость с Hacker News
-        try:
-            it_news = await _fetch_it_news()
-            if it_news:
-                from grok import ask_grok as _ask_grok
-                _result = await _ask_grok(
-                    f"IT новость: {it_news}\n\n"
-                    f"Напиши 1-2 предложения на русском: переведи заголовок и объясни о чём это. "
-                    f"Без вступлений, только суть."
-                )
-                if _result:
-                    lines.append(f"\n{'─' * 20}\n💻 *IT НОВОСТЬ*\n{_result}")
-        except Exception as e:
-            print(f"Evening IT news error: {e}")
-
-        await send_with_retry(bot, chat_id, "\n".join(lines))
+        await send_with_retry(bot, chat_id, "\n".join(lines), ignore_quiet_hours=True)
         _mark_evening_sent()
     except Exception as e:
-        print(f"Scheduler evening briefing error: {e}")
+        print(f"Scheduler evening briefing error: {e!r}")
 
 
 async def send_it_theory_job(bot, chat_id: int):
@@ -1951,7 +2656,7 @@ async def send_it_theory_job(bot, chat_id: int):
         from study_theory import send_it_theory
         await send_it_theory(bot, chat_id)
     except Exception as e:
-        print(f"it theory error: {e}")
+        print(f"it theory error: {e!r}")
 
 
 async def send_it_practice_job(bot, chat_id: int):
@@ -1959,7 +2664,7 @@ async def send_it_practice_job(bot, chat_id: int):
         from study_theory import send_it_practice
         await send_it_practice(bot, chat_id)
     except Exception as e:
-        print(f"it practice error: {e}")
+        print(f"it practice error: {e!r}")
 
 
 async def send_it_review_job(bot, chat_id: int):
@@ -1967,7 +2672,7 @@ async def send_it_review_job(bot, chat_id: int):
         from study_theory import send_it_review
         await send_it_review(bot, chat_id)
     except Exception as e:
-        print(f"it review error: {e}")
+        print(f"it review error: {e!r}")
 
 
 async def schedule_random_quote(bot, chat_id: int):
@@ -1993,7 +2698,7 @@ async def send_english_chunk_job(bot, chat_id: int):
         from study_theory import send_english_chunk
         await send_english_chunk(bot, chat_id)
     except Exception as e:
-        print(f"english chunk error: {e}")
+        print(f"english chunk error: {e!r}")
 
 
 async def send_english_pronunciation_job(bot, chat_id: int):
@@ -2001,7 +2706,7 @@ async def send_english_pronunciation_job(bot, chat_id: int):
         from study_theory import send_english_pronunciation
         await send_english_pronunciation(bot, chat_id)
     except Exception as e:
-        print(f"english pronunciation error: {e}")
+        print(f"english pronunciation error: {e!r}")
 
 
 async def send_english_dialog_job(bot, chat_id: int):
@@ -2009,7 +2714,7 @@ async def send_english_dialog_job(bot, chat_id: int):
         from study_theory import send_english_dialog
         await send_english_dialog(bot, chat_id)
     except Exception as e:
-        print(f"english dialog error: {e}")
+        print(f"english dialog error: {e!r}")
 
 
 
@@ -2034,7 +2739,7 @@ async def _fetch_it_news() -> str:
                 if title and len(title) > 15:
                     return title
     except Exception as e:
-        print(f"IT news Habr error: {e}")
+        print(f"IT news Habr error: {e!r}")
     return ""
 
 
@@ -2081,6 +2786,7 @@ async def check_lms_grades_and_notify(bot, chat_id: int):
                 sent_ok = await send_with_retry(bot, chat_id, text)
                 if sent_ok:
                     _mark_notification_sent(grade_key)
+                    _log_grade_recent(change, "lms")
                     try:
                         from parsers.lms import _load_lms_grades_sent, _save_lms_grades_sent
                         _sent = _load_lms_grades_sent()
@@ -2090,29 +2796,78 @@ async def check_lms_grades_and_notify(bot, chat_id: int):
                         pass
 
     except Exception as e:
-        print(f"LMS grades notify error: {e}")
+        print(f"LMS grades notify error: {e!r}")
 
 
 async def check_vk_and_notify(bot, chat_id: int):
-    """Каждые 15 минут — проверяем новые сообщения в беседе ВК за сегодня."""
-    now = datetime.datetime.now(tz=UFA_TZ)
-    if not (8 <= now.hour < 22):
-        return
+    """Каждые 15 минут — проверяем новые сообщения в беседе ВК. Работаем
+    круглосуточно как остальные источники (почта/мессенджер/нетология) —
+    тихие часы 22:00-08:00 обрабатывает send_with_retry (кладёт в очередь
+    и доставляет с 8 утра), а не отдельная проверка здесь."""
     if _playwright_lock.locked():
         print("VK: Playwright занят — пропускаем")
         return
     async with _playwright_lock:
         await _check_vk_and_notify_inner(bot, chat_id)
 
+def _vk_chat_label(url: str) -> str:
+    import re as _re
+    m = _re.search(r'sel=(c\d+)', url)
+    return m.group(1) if m else url
+
+
+_VK_SCHEDULE_RE = None
+
+
+def _is_vk_schedule_message(text: str) -> bool:
+    """Объявления об изменениях в расписании — их наставник перескажет сам,
+    в общий поток дословной пересылки они не идут."""
+    import re as _re
+    global _VK_SCHEDULE_RE
+    if _VK_SCHEDULE_RE is None:
+        _VK_SCHEDULE_RE = _re.compile(
+            r'расписан|мероприят|занят(ие|ия|ий|ий)|отмен|перенес|перенос|замен'
+            r'|лекци|лабораторн|семинар|консультаци|пара (перенесе|отмен|добавл)'
+            # Ссылку на вебинар часто публикуют отдельным сообщением ПОЗЖЕ основного
+            # анонса (её ещё нет с утра) — без этих слов такое сообщение не попадёт
+            # в vk_schedule_updates.json и ссылка не появится в schedule_vk_digest.json.
+            r'|вебинар|ссылк|mts-link',
+            _re.IGNORECASE,
+        )
+    return bool(_VK_SCHEDULE_RE.search(text))
+
+
+def _queue_vk_schedule_update(text: str, chat_label: str):
+    # scripts/mentor_checkin.py (отдельный launchd-процесс) читает и очищает
+    # этот же файл — без общего лока чтение-изменение-запись здесь могло
+    # затереть объявление, добавленное почти одновременно с его очисткой там.
+    from data_lock import atomic_write_json, file_lock
+    file = "data/vk_schedule_updates.json"
+    with file_lock(file):
+        try:
+            with open(file) as f:
+                data = json.load(f)
+        except Exception:
+            data = []
+        data.append({
+            "text": text,
+            "chat_label": chat_label,
+            "at": datetime.datetime.now(tz=UFA_TZ).isoformat(),
+        })
+        atomic_write_json(file, data)
+
+
 async def _check_vk_and_notify_inner(bot, chat_id: int):
-    now = datetime.datetime.now(tz=UFA_TZ)
     try:
-        from parsers.vk_browser import fetch_todays_vk_messages, _mark_hash_seen, _format_with_ai
+        from parsers.vk_browser import fetch_todays_vk_messages, _mark_hash_seen, _decode_vk_links
 
         # Хеши храним 3 дня — защита от дублей после перезапуска
         # Сброс не делаем, просто ограничиваем размер в _mark_hash_seen
 
-        messages = await fetch_todays_vk_messages()
+        messages = []
+        for chat_url in VK_CHAT_URLS:
+            label = _vk_chat_label(chat_url)
+            messages.extend(await fetch_todays_vk_messages(chat_url=chat_url, chat_label=label))
         if not messages:
             return
 
@@ -2120,70 +2875,67 @@ async def _check_vk_and_notify_inner(bot, chat_id: int):
             try:
                 vk_text = msg["text"]
                 msg_hash = msg["hash"]
+                chat_label = msg.get("chat_label", "")
 
-                # Форматируем через AI
-                formatted = await _format_with_ai(vk_text)
-                if not formatted:
-                    formatted = vk_text
+                # Объявления об изменениях в расписании — не форвардим дословно,
+                # откладываем наставнику: он перескажет их понятным языком в своём чек-ине
+                if _is_vk_schedule_message(vk_text):
+                    _queue_vk_schedule_update(vk_text, chat_label)
+                    _mark_hash_seen(msg_hash)
+                    print(f"VK: сообщение о расписании отложено наставнику hash={msg_hash}")
+                    continue
 
-                # Убираем мусорные ссылки из конца (vk.com/club, дубли away.php)
+                # Дословно — только чистим служебные ссылки, без AI-переформулирования
+                cleaned = _decode_vk_links(vk_text)
                 import re as _re_vk
-                formatted = _re_vk.sub(r'https?://vk\.com/club\d+[^\s]*', '', formatted)
-                formatted = _re_vk.sub(r'https?://vk\.com/away\.php[^\s]*', '', formatted)
-                formatted = _re_vk.sub(r'\s{3,}', '\n\n', formatted).strip()
-                header = "<b>💬 ВКонтакте</b>\n\n<b>💬 Новое сообщение</b>\n" + "─" * 20
-                full_text = f"{header}\n\n{formatted}"
-                if len(full_text) > 4000:
-                    full_text = full_text[:4000]
+                cleaned = _re_vk.sub(r'https?://vk\.com/club\d+[^\s]*', '', cleaned)
+                cleaned = _re_vk.sub(r'https?://vk\.com/away\.php[^\s]*', '', cleaned)
+                cleaned = _re_vk.sub(r'\s{3,}', '\n\n', cleaned).strip()
+                # Экранируем HTML-спецсимволы дословного текста — свои теги добавляем уже потом
+                escaped = (cleaned.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+                from bot.messages import new_vk_message
+                full_text = new_vk_message(escaped, chat_label)
+
+                _log_vk_recent(chat_label, cleaned)
 
                 # Помечаем виденным сразу — повторная проверка не найдёт дубль
                 _mark_hash_seen(msg_hash)
 
-                # Тихие часы 00:00-09:00 — не отправляем, кладём в pending
-                now_h = datetime.datetime.now(tz=UFA_TZ).hour
-                if 0 <= now_h < 9:
-                    _add_pending_notification(chat_id, full_text, "HTML")
-                    print(f"VK: сообщение отложено до утра hash={msg_hash}")
-                    continue
-
-                # Отправляем в HTML
-                sent_ok = False
-                try:
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=full_text,
-                        parse_mode="HTML",
-                        disable_web_page_preview=True
-                    )
-                    sent_ok = True
-                except Exception:
-                    # Если HTML не прошёл — отправляем без форматирования
-                    try:
-                        await bot.send_message(
-                            chat_id=chat_id,
-                            text=full_text,
-                            disable_web_page_preview=True
-                        )
-                        sent_ok = True
-                    except Exception:
-                        pass
-
-                if sent_ok:
-                    print(f"VK: отправлено сообщение hash={msg_hash}")
-                else:
-                    # Сетевая ошибка — кладём в pending
-                    _add_pending_notification(chat_id, full_text, "HTML")
-                    print(f"VK: не удалось отправить, отложено hash={msg_hash}")
+                # Единый путь отправки — тихие часы, разбивка длинных
+                # сообщений и HTML-фолбэк уже реализованы в send_with_retry.
+                sent_ok = await send_with_retry(bot, chat_id, full_text, parse_mode="HTML", disable_web_page_preview=True)
+                print(f"VK: {'отправлено' if sent_ok else 'отложено'} сообщение hash={msg_hash}")
 
             except Exception as e:
-                print(f"VK: ошибка отправки сообщения: {e}")
+                print(f"VK: ошибка отправки сообщения: {e!r}")
 
     except Exception as e:
-        print(f"VK check error: {e}")
+        print(f"VK check error: {e!r}")
 
 
 MIDDAY_SENT_FILE = "data/midday_sent.json"
 EVENING_SENT_FILE = "data/evening_sent.json"
+NOON_SENT_FILE = "data/noon_sent.json"
+
+
+def _is_noon_sent() -> bool:
+    try:
+        import json as _json
+        with open(NOON_SENT_FILE) as f:
+            data = _json.load(f)
+        today = datetime.datetime.now(tz=UFA_TZ).date().isoformat()
+        return data.get("date") == today
+    except Exception:
+        return False
+
+
+def _mark_noon_sent():
+    import json as _json
+    os.makedirs("data", exist_ok=True)
+    today = datetime.datetime.now(tz=UFA_TZ).date().isoformat()
+    with open(NOON_SENT_FILE, "w") as f:
+        _json.dump({"date": today}, f)
 
 
 def _is_midday_sent() -> bool:
@@ -2254,7 +3006,7 @@ async def send_quote(bot, chat_id: int):
             json.dump({"date": today}, f)
         print("Scheduler: цитата дня отправлена")
     except Exception as e:
-        print(f"Scheduler quote error: {e}")
+        print(f"Scheduler quote error: {e!r}")
 
 
 # ─── Напоминалка 17:00 ───────────────────────────────────────────────
@@ -2348,7 +3100,87 @@ async def send_afternoon_reminder(bot, chat_id: int):
             json.dump({"date": today}, f)
         print("Scheduler: напоминалка 17:00 отправлена")
     except Exception as e:
-        print(f"Scheduler reminder 17 error: {e}")
+        print(f"Scheduler reminder 17 error: {e!r}")
+
+# ─── Встречная проверка launchd-задач наставника ──────────────────────
+# scripts/error_watchdog.py следит за ботом (main.py) и остальными launchd-
+# задачами наставника, но сам он тоже launchd-задача — если пропадёт именно
+# он (см. 2026-09-20: mentor_checkin пропала из launchctl list на 3 дня
+# незамеченной), следить за ним больше некому. Бот сам продолжает жить
+# (APScheduler-джобы работают) даже когда всё остальное молчит — этим и
+# пользуемся: раз в час бот сам сверяет com.ilnursafin.errorwatchdog
+# (и заодно остальные launchd-задачи наставника, на случай если пропали
+# сразу несколько) и тихо перезагружает то, что отвалилось.
+_LAUNCHD_JOBS_TO_WATCH = {
+    "com.ilnursafin.errorwatchdog": "~/Library/LaunchAgents/com.ilnursafin.errorwatchdog.plist",
+    "com.ilnursafin.mentorcheckin": "~/Library/LaunchAgents/com.ilnursafin.mentorcheckin.plist",
+    "com.ilnursafin.mentorhourlywatch": "~/Library/LaunchAgents/com.ilnursafin.mentorhourlywatch.plist",
+    "com.ilnursafin.yaclinks": "~/Library/LaunchAgents/com.ilnursafin.yaclinks.plist",
+}
+_LAUNCHD_ALERT_FILE = "data/launchd_watch_state.json"
+
+
+async def check_launchd_health(bot, chat_id: int):
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "launchctl", "list",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        loaded_labels = {
+            line.split("\t")[-1].strip()
+            for line in stdout.decode("utf-8", "ignore").splitlines() if line.strip()
+        }
+    except Exception as e:
+        print(f"check_launchd_health: launchctl list не удался: {e!r}")
+        return
+
+    try:
+        with open(_LAUNCHD_ALERT_FILE) as f:
+            state = json.load(f)
+    except Exception:
+        state = {}
+
+    now = datetime.datetime.now(tz=UFA_TZ)
+    changed = False
+    for label, plist_rel in _LAUNCHD_JOBS_TO_WATCH.items():
+        if label in loaded_labels:
+            continue
+        plist_path = os.path.expanduser(plist_rel)
+        if not os.path.exists(plist_path):
+            continue
+        print(f"check_launchd_health: {label} не зарегистрирована — перезагружаю")
+        try:
+            load_proc = await asyncio.create_subprocess_exec(
+                "launchctl", "load", plist_path,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(load_proc.wait(), timeout=15)
+        except Exception as e:
+            print(f"check_launchd_health: не удалось перезагрузить {label}: {e!r}")
+            continue
+
+        last_alert = state.get(label)
+        alert_cooldown_ok = True
+        if last_alert:
+            mins = (now - datetime.datetime.fromisoformat(last_alert)).total_seconds() / 60
+            alert_cooldown_ok = mins > 180
+        if alert_cooldown_ok:
+            await send_with_retry(
+                bot, chat_id,
+                f"⚙️ Задача {label} пропала из launchd — перезагрузил обратно (проверка со стороны бота).",
+                ignore_quiet_hours=True,
+            )
+            state[label] = now.isoformat()
+            changed = True
+
+    if changed:
+        try:
+            with open(_LAUNCHD_ALERT_FILE, "w") as f:
+                json.dump(state, f)
+        except Exception:
+            pass
+
 
 def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(
@@ -2356,83 +3188,111 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
         job_defaults={"misfire_grace_time": 7200}  # для фоновых джобов
     )
 
-    # ── Утро 9:00 ──
-    scheduler.add_job(send_morning_briefing, trigger="cron", hour=9, minute=0,
-                      args=[bot, chat_id], id="morning_9", misfire_grace_time=3600)
-    # check_deadline_reminders убран — дедлайны показываются в утреннем брифинге
+    # ──────────────────────────────────────────────────────────────
+    # Проактивные push-уведомления бота ОТКЛЮЧЕНЫ (брифинги, теория,
+    # английский, цитаты, авто-уведомления о почте/мессенджере/ВК/
+    # оценках, недельный отчёт, случайная мотивация) — их роль теперь
+    # выполняет отдельный наставник-агент (scripts/mentor_checkin.py).
+    # Job'ы оставлены закомментированными, чтобы легко вернуть при желании.
+    # ──────────────────────────────────────────────────────────────
 
-    # 10:00 chunk дня
-    scheduler.add_job(send_english_chunk_job, trigger="cron", hour=10, minute=0,
-                      args=[bot, chat_id], id="english_chunk_1000", misfire_grace_time=3600)
-
-    # 14:00 дневной брифинг
+    # ── Утренний брифинг — включён на 08:30 (2026-09-17): формат подтверждён
+    #    пользователем (погода/пары/дедлайны 3 дня/топ-3 просроченных/цитата) ──
+    scheduler.add_job(send_morning_briefing, trigger="cron", hour=8, minute=30,
+                      args=[bot, chat_id], id="morning_830", misfire_grace_time=3600)
+    # scheduler.add_job(send_english_chunk_job, trigger="cron", hour=10, minute=0,
+    #                   args=[bot, chat_id], id="english_chunk_1000", misfire_grace_time=3600)
+    # ── Разбор дня — включён на 12:00 (2026-09-17): что пришло с утра по почте/
+    #    мессенджеру/ВК/Нетологии, не упущено ли важное ──
+    scheduler.add_job(send_noon_review, trigger="cron", hour=12, minute=0,
+                      args=[bot, chat_id], id="noon_1200", misfire_grace_time=3600)
+    # ── Дневной брифинг — включён на 14:00 (2026-09-17): пары + разбор
+    #    просрочек от Claude вместо задачи дня/мотивации от Groq ──
     scheduler.add_job(send_midday_briefing, trigger="cron", hour=14, minute=0,
                       args=[bot, chat_id], id="midday_14", misfire_grace_time=3600)
-
-    # 11:00 IT теория — новая тема
-    scheduler.add_job(send_it_theory_job, trigger="cron", hour=11, minute=0,
-                      args=[bot, chat_id], id="theory_it_1100", misfire_grace_time=3600)
-
-    # 13:00 IT практика — по теме 11:00
-    scheduler.add_job(send_it_practice_job, trigger="cron", hour=13, minute=0,
-                      args=[bot, chat_id], id="theory_it_practice_1300", misfire_grace_time=3600)
-
-    # 15:30 pronunciation дня
-    scheduler.add_job(send_english_pronunciation_job, trigger="cron", hour=15, minute=30,
-                      args=[bot, chat_id], id="english_pronun_1530", misfire_grace_time=3600)
-
-    # 17:00 напоминалка по дедлайнам
-    scheduler.add_job(send_afternoon_reminder, trigger="cron", hour=17, minute=0,
-                      args=[bot, chat_id], id="reminder_17", misfire_grace_time=3600)
-
-    # 19:00 IT повторение — флэшкард по теме 2-3 дня назад
-    scheduler.add_job(send_it_review_job, trigger="cron", hour=19, minute=0,
-                      args=[bot, chat_id], id="theory_it_review_1900", misfire_grace_time=3600)
-
-    # ── Вечер 21:00 — вечерний брифинг ──
-    scheduler.add_job(send_evening_briefing, trigger="cron", hour=21, minute=0,
-                      args=[bot, chat_id], id="evening_21", misfire_grace_time=3600)
-
-    # 22:00 диалог дня
-    scheduler.add_job(send_english_dialog_job, trigger="cron", hour=22, minute=0,
-                      args=[bot, chat_id], id="english_dialog_2200", misfire_grace_time=3600)
-
-    # Цитата — рандомное время между 09:00 и 15:00 каждый день
-    scheduler.add_job(schedule_random_quote, trigger="cron", hour=9, minute=1,
-                      args=[bot, chat_id], id="quote_random_scheduler", misfire_grace_time=3600)
-
-    # ── Воскресенье 20:00 недельный отчёт ──
-    scheduler.add_job(send_weekly_report, trigger="cron", day_of_week="sun", hour=20, minute=0,
-                      args=[bot, chat_id], id="weekly_report", misfire_grace_time=3600)
-
-    # ВК мониторинг каждые 15 минут (8:00-22:00)
+    # scheduler.add_job(send_it_theory_job, trigger="cron", hour=11, minute=0,
+    #                   args=[bot, chat_id], id="theory_it_1100", misfire_grace_time=3600)
+    # scheduler.add_job(send_it_practice_job, trigger="cron", hour=13, minute=0,
+    #                   args=[bot, chat_id], id="theory_it_practice_1300", misfire_grace_time=3600)
+    # scheduler.add_job(send_english_pronunciation_job, trigger="cron", hour=15, minute=30,
+    #                   args=[bot, chat_id], id="english_pronun_1530", misfire_grace_time=3600)
+    # scheduler.add_job(send_afternoon_reminder, trigger="cron", hour=17, minute=0,
+    #                   args=[bot, chat_id], id="reminder_17", misfire_grace_time=3600)
+    # scheduler.add_job(send_it_review_job, trigger="cron", hour=19, minute=0,
+    #                   args=[bot, chat_id], id="theory_it_review_1900", misfire_grace_time=3600)
+    # ── Вечерний брифинг — включён на 22:00 (2026-09-17): итоги дня + весёлая
+    #    мотивация от Claude на завтра + расписание завтра. Граница тихих
+    #    часов — send_evening_briefing сам шлёт с ignore_quiet_hours=True ──
+    scheduler.add_job(send_evening_briefing, trigger="cron", hour=22, minute=0,
+                      args=[bot, chat_id], id="evening_22", misfire_grace_time=3600)
+    # scheduler.add_job(send_english_dialog_job, trigger="cron", hour=22, minute=0,
+    #                   args=[bot, chat_id], id="english_dialog_2200", misfire_grace_time=3600)
+    # scheduler.add_job(schedule_random_quote, trigger="cron", hour=9, minute=1,
+    #                   args=[bot, chat_id], id="quote_random_scheduler", misfire_grace_time=3600)
+    # scheduler.add_job(send_weekly_report, trigger="cron", day_of_week="sun", hour=20, minute=0,
+    #                   args=[bot, chat_id], id="weekly_report", misfire_grace_time=3600)
+    # ── Почта/Gmail/Мессенджер/ВК/Нетология — единый интервал 15 мин и единый
+    #    стиль уведомлений (заголовок/подзаголовок/разделитель/цитата) ──
     scheduler.add_job(check_vk_and_notify, trigger="interval", minutes=15,
                       args=[bot, chat_id], id="vk_monitor", max_instances=1, coalesce=True)
-
-    # ── Фоновые джобы ──
-    scheduler.add_job(check_grades_and_notify, trigger="interval", minutes=10,
+    # ── Оценки — раз в час (Modeus и LMS вместе, единая частота) ──
+    scheduler.add_job(check_grades_and_notify, trigger="interval", minutes=60,
                       start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=3),
-                      args=[bot, chat_id], id="grades_check")
-    scheduler.add_job(check_lms_grades_and_notify, trigger="interval", minutes=15,
+                      args=[bot, chat_id], id="grades_check", max_instances=1, coalesce=True)
+    scheduler.add_job(check_lms_grades_and_notify, trigger="interval", minutes=60,
                       start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=2),
-                      args=[bot, chat_id], id="lms_grades_check")
-    scheduler.add_job(check_mail_and_notify, trigger="interval", minutes=5,
-                      args=[bot, chat_id], id="mail_check")
-    scheduler.add_job(check_messenger_and_notify, trigger="interval", minutes=5,
+                      args=[bot, chat_id], id="lms_grades_check", max_instances=1, coalesce=True)
+    scheduler.add_job(check_mail_and_notify, trigger="interval", minutes=15,
+                      args=[bot, chat_id], id="mail_check", max_instances=1, coalesce=True)
+    scheduler.add_job(check_messenger_and_notify, trigger="interval", minutes=15,
                       start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=2),
                       args=[bot, chat_id], id="messenger_check", max_instances=1, coalesce=True)
+    scheduler.add_job(check_netology_notifications_and_notify, trigger="interval", minutes=15,
+                      start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=4),
+                      args=[bot, chat_id], id="netology_notif_check", max_instances=1, coalesce=True)
+    # ── Gmail (второй почтовый ящик) — 2026-09-17 ──
+    scheduler.add_job(check_gmail_and_notify, trigger="interval", minutes=15,
+                      start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=1),
+                      args=[bot, chat_id], id="gmail_check", max_instances=1, coalesce=True)
+    # ── Ночной полный обход Мессенджера (00:00) — читает все чаты целиком
+    #    для контекста наставника, ничего не шлёт в Telegram напрямую ──
+    scheduler.add_job(messenger_nightly_full_sweep, trigger="cron", hour=0, minute=0,
+                      args=[bot, chat_id], id="messenger_nightly_sweep", max_instances=1, coalesce=True)
+    # scheduler.add_job(check_random_reminder, trigger="interval", minutes=5,
+    #                   args=[bot, chat_id], id="random_reminder")
+    # Уведомления "скоро пара" за 60 и 15 минут — включены 2026-10-01 по
+    # просьбе пользователя (раньше функция была отключена и знала только Modeus).
+    scheduler.add_job(check_lesson_reminders, trigger="interval", minutes=2,
+                      args=[bot, chat_id], id="lesson_reminders", max_instances=1, coalesce=True)
+    # check_deadline_reminders (за 7/3/1 день до дедлайна) — рабочая функция,
+    # но НИКОГДА не была зарегистрирована здесь (найдено аудитом 2026-09-17,
+    # не то же самое, что осознанно отключённые джобы выше). Оставлена
+    # закомментированной как и соседи, а не включена — сейчас напоминания
+    # о дедлайнах идёт через наставника (scripts/mentor_checkin.py).
+    # scheduler.add_job(check_deadline_reminders, trigger="interval", hours=6,
+    #                   args=[bot, chat_id], id="deadline_reminders")
+
+    # ── Оставлено: доставка пользовательских напоминаний/задач ──
     scheduler.add_job(retry_pending_notifications, trigger="interval", minutes=10,
                       args=[bot], id="retry_notifications")
-    scheduler.add_job(check_random_reminder, trigger="interval", minutes=5,
-                      args=[bot, chat_id], id="random_reminder")
     scheduler.add_job(check_user_reminders, trigger="interval", minutes=3,
                       args=[bot, chat_id], id="user_reminders")
-    scheduler.add_job(sync_all_tasks, trigger="interval", minutes=30,
+    scheduler.add_job(sync_all_tasks, trigger="interval", minutes=60,
                       args=[bot, chat_id], id="sync_tasks", max_instances=1, coalesce=True,
                       start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=5))
-    scheduler.add_job(check_lesson_reminders, trigger="interval", minutes=5,
-                      args=[bot, chat_id], id="lesson_reminders")
+    # ── Тихое обновление schedule_cache.json (без Telegram) — раньше было
+    #    побочным эффектом отключённых брифингов, без него кэш не обновлялся
+    #    сам вообще (баг обнаружен 2026-09-10 — не видно было английского) ──
+    scheduler.add_job(refresh_schedule_cache_silent, trigger="interval", hours=4,
+                      id="schedule_cache_refresh", max_instances=1, coalesce=True,
+                      start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=1))
+    # ── Встречная проверка launchd-задач наставника (error_watchdog и др.) —
+    #    бот сам переживает то, что роняет остальное (см. комментарий у
+    #    check_launchd_health) ──
+    scheduler.add_job(check_launchd_health, trigger="interval", hours=1,
+                      args=[bot, chat_id], id="launchd_health", max_instances=1, coalesce=True,
+                      start_date=datetime.datetime.now(tz=UFA_TZ) + datetime.timedelta(minutes=2))
 
-    print("Scheduler: настроен ✅")
+    print("Scheduler: настроен ✅ (проактивные уведомления отключены, наставник — отдельным процессом)")
     return scheduler
 

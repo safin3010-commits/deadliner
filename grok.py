@@ -1,5 +1,7 @@
 """
-AI клиент для ДедЛайнер — Groq (openai/gpt-oss-120b).
+AI клиент для ДедЛайнер — Groq (openai/gpt-oss-120b) + узкие задачи через
+headless Claude Code (claude -p, Haiku) для мест, где важна не тональность
+ответа, а структурная точность (например разбор задачи/напоминания из текста).
 """
 import httpx
 import datetime
@@ -10,6 +12,55 @@ GROQ_MODEL = "openai/gpt-oss-120b"
 
 from config import GROQ_KEYS
 _groq_key_idx = 0
+
+
+async def ask_claude_fast(prompt: str, system: str = None, timeout: int = 60) -> str:
+    """Узкая структурная задача (например извлечь JSON из текста) — через
+    headless `claude -p` на Haiku. Использует локальную подписку Claude Code,
+    а не отдельный API-ключ — не зависит от лимитов Groq (2026-09-10: все
+    ключи Groq разом исчерпались, парсинг задач в боте встал — здесь такого
+    отказа не будет, максимум одноразовая сетевая ошибка). Никогда не
+    поднимает исключение наружу — при любой проблеме просто вернёт "" и
+    вызывающий код покажет пользователю "не удалось распознать"."""
+    import asyncio
+    import os
+    import shutil
+
+    claude_bin = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+    if not os.path.isfile(claude_bin):
+        print("ask_claude_fast: claude CLI не найден")
+        return ""
+
+    full_prompt = f"{system}\n\n{prompt}" if system else prompt
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            claude_bin, "-p", full_prompt,
+            "--permission-prompts", "none",
+            "--model", "claude-haiku-4-5-20251001",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except Exception as e:
+        print(f"ask_claude_fast: не удалось запустить claude ({e})")
+        return ""
+
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        print(f"ask_claude_fast: не ответил за {timeout}с")
+        return ""
+
+    text = (stdout or b"").decode("utf-8", "ignore").strip()
+    if not text or proc.returncode != 0:
+        err = (stderr or b"").decode("utf-8", "ignore")[:200]
+        print(f"ask_claude_fast: returncode={proc.returncode}, stderr={err}")
+        return ""
+    return text
 
 
 def _build_system_prompt() -> str:
@@ -104,8 +155,12 @@ async def grok_morning_plan(schedule: list, tasks: list, streak: int) -> str:
     return await ask_grok(prompt)
 
 
-async def grok_evening_analysis(report: str, tasks_done_today: int, tasks_total: int, streak: int) -> str:
-    prompt = f'''Пользователь отчитался: "{report}". Выполнено: {tasks_done_today}, осталось: {tasks_total}, стрик: {streak} дн. Оцени продуктивность (1-10), что улучшить. Коротко.'''
+async def grok_evening_analysis(report: str, tasks_done_today: int, tasks_total: int, streak: int, memory_recap: str = "") -> str:
+    prompt = (
+        (f"{memory_recap}\n\n" if memory_recap else "") +
+        f'Пользователь отчитался: "{report}". Выполнено: {tasks_done_today}, осталось: {tasks_total}, '
+        f'стрик: {streak} дн. Оцени продуктивность (1-10), что улучшить. Коротко.'
+    )
     return await ask_grok(prompt)
 
 

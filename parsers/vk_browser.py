@@ -7,7 +7,7 @@ import os
 import asyncio
 import datetime
 import hashlib
-from config import UFA_TZ, VK_CHAT_URL, VK_PROXY, CHROME_PATH
+from config import UFA_TZ, VK_CHAT_URL, VK_CHAT_URLS, VK_PROXY, CHROME_PATH
 
 # VK_CHAT_URL берётся из config
 VK_SEEN_FILE = "data/vk_seen.json"
@@ -122,16 +122,24 @@ async def _format_with_ai(text: str) -> str:
         if result:
             return result
     except Exception as e:
-        print(f"VK format AI error: {e}")
+        print(f"VK format AI error: {e!r}")
     # Фоллбэк — хотя бы декодируем ссылки
     return _decode_vk_links(text).strip()
 
 
-async def fetch_todays_vk_messages() -> list:
+async def fetch_todays_vk_messages(chat_url: str = None, chat_label: str = "") -> list:
     """
-    Открываем беседу, берём все сообщения из блока 'сегодня',
-    возвращаем только новые (не виданные раньше).
+    Открываем беседу (chat_url, по умолчанию первая из VK_CHAT_URLS), берём все
+    сообщения из блока 'сегодня', возвращаем только новые (не виданные раньше).
+    chat_label используется для различения бесед в хеше и в выводе.
     """
+    # VK_CHAT_URL может содержать несколько ссылок через запятую — при вызове
+    # без chat_url (например ручной `python3 parsers/vk_browser.py`) берём
+    # первую из VK_CHAT_URLS, а не сырую строку с запятыми внутри.
+    chat_url = chat_url or (VK_CHAT_URLS[0] if VK_CHAT_URLS else "")
+    if not chat_url:
+        print("VK: не задан VK_CHAT_URL")
+        return []
     try:
         from playwright.async_api import async_playwright
 
@@ -153,15 +161,19 @@ async def fetch_todays_vk_messages() -> list:
             await context.add_cookies(cookies)
             page = await context.new_page()
 
-            print(f"VK: открываем беседу...")
-            await page.goto(VK_CHAT_URL, timeout=60000, wait_until="domcontentloaded")
+            print(f"VK: открываем беседу {chat_label or chat_url}...")
+            await page.goto(chat_url, timeout=60000, wait_until="domcontentloaded")
             try:
                 await page.wait_for_selector('[class*="ConvoHistory__dateStack"]', timeout=20000)
             except Exception:
                 pass
             await page.wait_for_timeout(3000)
 
-            if "login" in page.url:
+            try:
+                page_title = await page.title()
+            except Exception:
+                page_title = ""
+            if "login" in page.url or page_title.strip() == "VK | Welcome!":
                 print("VK: куки протухли")
                 await browser.close()
                 try:
@@ -223,15 +235,15 @@ async def fetch_todays_vk_messages() -> list:
             for text in messages:
                 if len(text.strip()) < 20:
                     continue
-                msg_hash = hashlib.md5(f"{today_str}:{text[:150].strip()}".encode()).hexdigest()[:16]
+                msg_hash = hashlib.md5(f"{chat_url}:{today_str}:{text[:150].strip()}".encode()).hexdigest()[:16]
                 if not _is_hash_seen(msg_hash):
-                    new_messages.append({"text": text, "hash": msg_hash})
+                    new_messages.append({"text": text, "hash": msg_hash, "chat_label": chat_label})
 
             print(f"VK: новых сообщений: {len(new_messages)}")
             return new_messages
 
     except Exception as e:
-        print(f"VK browser error: {e}")
+        print(f"VK browser error: {e!r}")
         return []
 
 
@@ -257,10 +269,6 @@ async def save_cookies(chrome_path=None, vk_proxy=None):
             json.dump(cookies, f, ensure_ascii=False)
         print(f"Сохранено {len(cookies)} куки")
         await browser.close()
-
-
-def mark_vk_sent(msg_id: int, msg_hash: str = ""):
-    _mark_hash_seen(msg_hash if msg_hash else str(msg_id))
 
 
 if __name__ == "__main__":

@@ -3,9 +3,17 @@ import json
 import asyncio
 import datetime
 import httpx
+from parsers.direct_net import direct_async_client
 from bs4 import BeautifulSoup
 from config import MODEUS_USERNAME, MODEUS_PASSWORD, UFA_TZ
 from storage import get_token, save_token
+
+class ModeusAuthError(Exception):
+    """Не удалось авторизоваться в Modeus (истёк логин/пароль, SSO не отвечает
+    и т.п.) — отличаем от "пар в этот день/неделю просто нет", чтобы вызывающий
+    код не показывал пользователю пустое расписание вместо реальной ошибки."""
+    pass
+
 
 MODEUS_BASE_URL = "https://utmn.modeus.org"
 MODEUS_CONFIG_URL = f"{MODEUS_BASE_URL}/schedule-calendar/assets/app.config.json"
@@ -32,10 +40,10 @@ def _load_schedule_cache() -> dict:
 
 def _save_schedule_cache(cache: dict):
     try:
-        with open(SCHEDULE_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(cache, f, ensure_ascii=False, indent=2)
+        from data_lock import atomic_write_json
+        atomic_write_json(SCHEDULE_CACHE_FILE, cache)
     except Exception as e:
-        print(f"Modeus cache save failed: {e}")
+        print(f"Modeus cache save failed: {e!r}")
 
 
 def _get_cached_week(week_start: datetime.date) -> dict | None:
@@ -47,19 +55,30 @@ def _get_cached_week(week_start: datetime.date) -> dict | None:
     age_hours = (datetime.datetime.now(tz=datetime.UTC) - cached_at).total_seconds() / 3600
     if age_hours < 12:
         print(f"Modeus: кэш расписания (возраст {age_hours:.1f}ч)")
-        return entry["data"]
+        return entry.get("data", {})
     return None
 
 
 def _set_cached_week(week_start: datetime.date, data: dict):
-    cache = _load_schedule_cache()
-    cache[week_start.isoformat()] = {
-        "cached_at": datetime.datetime.now(tz=datetime.UTC).isoformat(),
-        "data": data,
-    }
-    if len(cache) > 8:
-        del cache[sorted(cache.keys())[0]]
-    _save_schedule_cache(cache)
+    # Лок на весь читай-меняй-пиши — этот же файл параллельно читает/пишет
+    # scheduler.py (refresh_schedule_cache_silent) и обработчик /schedule
+    # (bot/handlers.py), иначе более позднее чтение здесь могло перезаписать
+    # их обновление другой недели, потерянное между чтением и записью.
+    from data_lock import file_lock
+    with file_lock(SCHEDULE_CACHE_FILE):
+        cache = _load_schedule_cache()
+        # Сохраняем уже закэшированную Нетологию той же недели — раньше эта
+        # функция полностью заменяла запись недели, стирая "netology" до
+        # следующего фонового refresh_schedule_cache_silent (раз в 4ч).
+        prev_netology = cache.get(week_start.isoformat(), {}).get("netology", {})
+        cache[week_start.isoformat()] = {
+            "cached_at": datetime.datetime.now(tz=datetime.UTC).isoformat(),
+            "data": data,
+            "netology": prev_netology,
+        }
+        if len(cache) > 8:
+            del cache[sorted(cache.keys())[0]]
+        _save_schedule_cache(cache)
 
 
 # ─── Авторизация ──────────────────────────────────────────────────────
@@ -68,12 +87,23 @@ def _try_auth_sync() -> str | None:
     import requests
     from secrets import token_hex
     from urllib.parse import urlparse, urlencode
+    from parsers.direct_net import make_requests_adapter
 
     s = requests.Session()
     s.headers.update(HEADERS)
     s.verify = False
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    # Обходим и системный DNS (подменяется VPN на Fake-IP, см. parsers/direct_net.py),
+    # и сам VPN-туннель на уровне сокета — иначе весь этот логин (несколько
+    # редиректов через fs.utmn.ru/auth.modeus.org) стабильно виснет при
+    # включённом VPN, хотя у пользователя напрямую всё открывается (обнаружено
+    # и починено для LMS/httpx 2026-09-22, здесь — тот же принцип для requests).
+    _adapter = make_requests_adapter()
+    if _adapter:
+        s.mount("https://", _adapter)
+        s.mount("http://", _adapter)
 
     r = s.get(MODEUS_CONFIG_URL, timeout=30)
     config = r.json()
@@ -106,6 +136,7 @@ def _try_auth_sync() -> str | None:
         else:
             r = s.get(next_url, timeout=10, allow_redirects=False)
     if r.status_code == 403:
+        print("Modeus auth: шаг 1 (fs.utmn.ru) вернул 403")
         return None
 
     token = _token_re.search(r.url)
@@ -115,6 +146,7 @@ def _try_auth_sync() -> str | None:
     html = BeautifulSoup(r.text, "html.parser")
     form = html.find("form")
     if not form:
+        print(f"Modeus auth: шаг 1 — форма логина не найдена (status={r.status_code}, url={r.url[:80]})")
         return None
 
     form_action = form.get("action", r.url)
@@ -137,6 +169,7 @@ def _try_auth_sync() -> str | None:
     inputs2 = [i.get("name") for i in form2.find_all("input")] if form2 else []
 
     if not form2 or ("UserName" in inputs2 and "Password" in inputs2):
+        print(f"Modeus auth: шаг 2 — логин не принят (форма2 нет или снова просит UserName/Password, inputs={inputs2})")
         return None
 
     saml_action = form2.get("action", "https://auth.modeus.org/commonauth")
@@ -171,6 +204,7 @@ def _try_auth_sync() -> str | None:
             break
         current = next_loc
 
+    print(f"Modeus auth: шаг 3 — SAML-редирект не дошёл до токена (status2={r2.status_code}, loc={loc[:100]})")
     return None
 
 
@@ -274,18 +308,29 @@ async def _try_auth(http2: bool) -> str | None:
 
 
 async def get_modeus_jwt() -> str | None:
-    try:
-        token = await asyncio.to_thread(_try_auth_sync)
-        if token:
-            save_token("modeus_jwt", token)
-            save_token(
-                "modeus_jwt_expires",
-                (datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(hours=11)).isoformat()
-            )
-            print("Modeus: авторизация успешна ✅")
-            return token
-    except Exception as e:
-        import traceback; traceback.print_exc(); print(f"Modeus auth failed: {e}")
+    # Наблюдение (2026-09): успех с первой попытки — редкость (~1 из ~300),
+    # похоже на нестабильность fs.utmn.ru на стороне университета, а не
+    # на баг в самой логике логина (при ручной проверке та же логика
+    # проходит стабильно). Один быстрый повтор почти без затрат ловит
+    # долю транзиентных сбоев, не дожидаясь следующего 20-минутного цикла.
+    from parsers.direct_net import direct_dns_override
+    for attempt in range(2):
+        try:
+            with direct_dns_override():
+                token = await asyncio.to_thread(_try_auth_sync)
+            if token:
+                save_token("modeus_jwt", token)
+                save_token(
+                    "modeus_jwt_expires",
+                    (datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(hours=11)).isoformat()
+                )
+                print("Modeus: авторизация успешна ✅")
+                return token
+        except Exception as e:
+            import traceback; traceback.print_exc(); print(f"Modeus auth failed: {e!r}")
+        if attempt == 0:
+            print("Modeus: 1-я попытка не удалась, повтор через 3с...")
+            await asyncio.sleep(3)
     print("Modeus: не удалось авторизоваться")
     return None
 
@@ -308,7 +353,7 @@ def get_person_id_from_jwt(jwt_token: str) -> str | None:
         decoded = jwt.decode(jwt_token, options={"verify_signature": False})
         return decoded.get("person_id")
     except Exception as e:
-        print(f"Modeus: не удалось декодировать JWT: {e}")
+        print(f"Modeus: не удалось декодировать JWT: {e!r}")
         return None
 
 
@@ -322,7 +367,7 @@ async def get_schedule(jwt_token: str, person_id: str, date: datetime.date) -> l
 
         payload = {"timeMin": time_min, "timeMax": time_max, "attendeePersonId": [person_id], "size": 50}
 
-        async with httpx.AsyncClient(base_url=MODEUS_BASE_URL, timeout=30, http2=True) as client:
+        async with direct_async_client(base_url=MODEUS_BASE_URL, timeout=30, http2=True) as client:
             client.headers["Authorization"] = f"Bearer {jwt_token}"
             client.headers["Content-Type"] = "application/json"
             response = await client.post(MODEUS_EVENTS_URL, json=payload)
@@ -335,7 +380,7 @@ async def get_schedule(jwt_token: str, person_id: str, date: datetime.date) -> l
             return parse_schedule(response.json())
 
     except Exception as e:
-        print(f"Modeus get_schedule failed: {e}")
+        print(f"Modeus get_schedule failed: {e!r}")
         return []
 
 
@@ -347,11 +392,11 @@ async def get_week_schedule(week_start: datetime.date) -> dict:
     print(f"Modeus: запрашиваем неделю с {week_start}...")
     jwt_token = await get_cached_jwt()
     if not jwt_token:
-        return {}
+        raise ModeusAuthError("не удалось получить токен Modeus (логин не прошёл)")
 
     person_id = get_person_id_from_jwt(jwt_token)
     if not person_id:
-        return {}
+        raise ModeusAuthError("не удалось определить person_id из токена Modeus")
 
     schedule_by_day = {}
     for i in range(7):

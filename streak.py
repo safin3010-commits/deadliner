@@ -12,18 +12,66 @@ from config import UFA_TZ
 STREAK_FILE = "data/streak.json"
 
 
-def _load() -> dict:
+def _load_raw() -> dict:
     try:
         with open(STREAK_FILE) as f:
             return json.load(f)
     except Exception:
-        return {"streak": 0, "last_active": "", "max_streak": 0, "evening_reported": ""}
+        return {}
 
 
 def _save(data: dict):
     os.makedirs("data", exist_ok=True)
-    with open(STREAK_FILE, "w") as f:
+    tmp = STREAK_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, STREAK_FILE)
+
+
+def active_days() -> set:
+    """Дни, в которые пользователь сам закрыл хотя бы одну задачу
+    (manually_done + done_at) — в боте, галочкой на столе, текстом."""
+    from storage import get_tasks
+    days = set()
+    for t in get_tasks():
+        if t.get("manually_done") and t.get("done_at"):
+            try:
+                days.add(datetime.datetime.fromisoformat(t["done_at"]).astimezone(UFA_TZ).date())
+            except ValueError:
+                pass
+    return days
+
+
+def compute_streak() -> dict:
+    """Стрик считается из дат закрытия задач, а не хранится счётчиком.
+    Раньше mark_active_today() никто не вызывал, и streak.json застыл на
+    16.04 — сообщения наставника и /streak показывали неправду. Сегодняшний
+    день без закрытий стрик ещё не обрывает (день не кончился)."""
+    days = active_days()
+    today = datetime.datetime.now(tz=UFA_TZ).date()
+    cur = 0
+    d = today if today in days else today - datetime.timedelta(days=1)
+    while d in days:
+        cur += 1
+        d -= datetime.timedelta(days=1)
+    best = run = 0
+    prev = None
+    for day in sorted(days):
+        run = run + 1 if prev and (day - prev).days == 1 else 1
+        best = max(best, run)
+        prev = day
+    last = max(days).isoformat() if days else ""
+    return {"streak": cur, "max_streak": best, "last_active": last}
+
+
+def _load() -> dict:
+    data = _load_raw()
+    computed = compute_streak()
+    merged = {**data, **computed}
+    if any(data.get(k) != computed[k] for k in computed):
+        # Держим streak.json в актуальном виде для тех, кто читает файл.
+        _save(merged)
+    return merged
 
 
 def get_streak() -> int:
@@ -36,40 +84,10 @@ def get_max_streak() -> int:
 
 
 def mark_active_today() -> dict:
-    """
-    Отмечаем сегодняшний день как активный (выполнена хоть одна задача).
-    Возвращает {"streak": N, "is_new_record": bool, "continued": bool}
-    """
-    today = datetime.datetime.now(tz=UFA_TZ).date().isoformat()
-    yesterday = (datetime.datetime.now(tz=UFA_TZ).date() - datetime.timedelta(days=1)).isoformat()
-
+    """Совместимость: стрик теперь вычисляется сам из закрытых задач."""
+    before = _load_raw().get("max_streak", 0)
     data = _load()
-    last = data.get("last_active", "")
-
-    if last == today:
-        # Уже отмечено сегодня
-        return {"streak": data["streak"], "is_new_record": False, "continued": False}
-
-    if last == yesterday:
-        # Продолжаем стрик
-        data["streak"] += 1
-        continued = True
-    else:
-        # Стрик прерван или первый день
-        data["streak"] = 1
-        continued = False
-
-    data["last_active"] = today
-    old_max = data.get("max_streak", 0)
-    if data["streak"] > old_max:
-        data["max_streak"] = data["streak"]
-
-    _save(data)
-    return {
-        "streak": data["streak"],
-        "is_new_record": data["streak"] > old_max,
-        "continued": continued,
-    }
+    return {"streak": data["streak"], "is_new_record": data["streak"] > before, "continued": data["streak"] > 1}
 
 
 def check_streak_at_risk() -> bool:
@@ -95,7 +113,7 @@ def was_evening_reported() -> bool:
 def mark_evening_reported():
     """Отмечаем что вечерний отчёт сделан."""
     today = datetime.datetime.now(tz=UFA_TZ).date().isoformat()
-    data = _load()
+    data = _load_raw()
     data["evening_reported"] = today
     _save(data)
 

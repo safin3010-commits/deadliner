@@ -3,7 +3,16 @@ import json
 import os
 import datetime
 import httpx
+from parsers.direct_net import direct_async_client
 from config import LMS_USERNAME, LMS_PASSWORD, UFA_TZ
+
+
+class LMSAuthError(Exception):
+    """Не удалось авторизоваться в LMS (неверный логин/пароль, SSO не пускает)
+    — отличаем от "заданий/оценок просто нет", чтобы вызывающий код
+    (sync_all_tasks) не показывал молчание вместо реальной ошибки (тот же
+    принцип, что у ModeusAuthError/NetologyAuthError)."""
+    pass
 
 LMS_BASE_URL = "https://lms.utmn.ru"
 HEADERS = {
@@ -88,43 +97,111 @@ def _is_graded(grade_text: str) -> bool:
     return g not in ("-", "", "—") and g is not None
 
 
+LMS_SESSION_CACHE_FILE = "data/lms_session_cache.json"
+LMS_SESSION_TTL_MINUTES = 20  # логинимся заново не чаще этого — иначе WAF lms.utmn.ru
+                              # принимает частые повторные логины за бота и блокирует IP
+
+
+def _load_lms_session_cache() -> dict:
+    try:
+        with open(LMS_SESSION_CACHE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_lms_session_cache(cookies: dict, sesskey: str):
+    os.makedirs("data", exist_ok=True)
+    tmp = LMS_SESSION_CACHE_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({
+            "cookies": cookies,
+            "sesskey": sesskey,
+            "saved_at": datetime.datetime.now(tz=UFA_TZ).isoformat(),
+        }, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, LMS_SESSION_CACHE_FILE)
+
+
+async def _lms_login(client: httpx.AsyncClient) -> str:
+    """Возвращает sesskey — либо переиспользует недавнюю сессию (куки в
+    cache-файле, свежесть до LMS_SESSION_TTL_MINUTES), либо логинится
+    заново и сохраняет новую сессию для следующих вызовов."""
+    cached = _load_lms_session_cache()
+    saved_at = cached.get("saved_at")
+    if saved_at:
+        age_min = (datetime.datetime.now(tz=UFA_TZ) - datetime.datetime.fromisoformat(saved_at)).total_seconds() / 60
+        if age_min < LMS_SESSION_TTL_MINUTES and cached.get("sesskey"):
+            for name, value in cached.get("cookies", {}).items():
+                client.cookies.set(name, value, domain="lms.utmn.ru")
+            r_my = await client.get(f"{LMS_BASE_URL}/my/")
+            if "login" not in str(r_my.url).lower():
+                print(f"LMS: сессия из кэша (возраст {age_min:.0f} мин)")
+                return cached["sesskey"]
+            print("LMS: кэшированная сессия невалидна, логинимся заново")
+
+    r = await client.get(f"{LMS_BASE_URL}/login/index.php")
+    lt = re.search(r'name="logintoken"\s+value="([^"]+)"', r.text)
+    login_token = lt.group(1) if lt else ""
+
+    await client.post(f"{LMS_BASE_URL}/login/index.php", data={
+        "username": LMS_USERNAME, "password": LMS_PASSWORD,
+        "logintoken": login_token, "anchor": "",
+    }, headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": f"{LMS_BASE_URL}/login/index.php", "Origin": LMS_BASE_URL})
+
+    r_my = await client.get(f"{LMS_BASE_URL}/my/")
+    if "login" in str(r_my.url).lower():
+        return ""
+
+    sk = re.search(r'"sesskey":"([^"]+)"', r_my.text)
+    sesskey = sk.group(1) if sk else ""
+    if sesskey:
+        cookies = {c.name: c.value for c in client.cookies.jar}
+        _save_lms_session_cache(cookies, sesskey)
+        print("LMS: авторизация успешна ✅ (сессия закэширована)")
+    return sesskey
+
 
 async def fetch_lms_deadlines() -> tuple:
     print("LMS: начинаем парсинг...")
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=HEADERS) as client:
+    async with direct_async_client(timeout=30, follow_redirects=True, headers=HEADERS) as client:
         try:
-            # Логин
-            r = await client.get(f"{LMS_BASE_URL}/login/index.php")
-            lt = re.search(r'name="logintoken"\s+value="([^"]+)"', r.text)
-            login_token = lt.group(1) if lt else ""
-
-            await client.post(f"{LMS_BASE_URL}/login/index.php", data={
-                "username": LMS_USERNAME, "password": LMS_PASSWORD,
-                "logintoken": login_token, "anchor": "",
-            }, headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded",
-                        "Referer": f"{LMS_BASE_URL}/login/index.php", "Origin": LMS_BASE_URL})
-
-            r_my = await client.get(f"{LMS_BASE_URL}/my/")
-            if "login" in str(r_my.url).lower():
+            sesskey = await _lms_login(client)
+            if not sesskey:
                 print("LMS: логин не удался")
-                return []
+                raise LMSAuthError("не удалось получить sesskey (логин не прошёл)")
 
-            sk = re.search(r'"sesskey":"([^"]+)"', r_my.text)
-            sesskey = sk.group(1) if sk else ""
-            print(f"LMS: авторизация успешна ✅")
+            async def _fetch_courses_page(sesskey: str):
+                r = await client.post(
+                    f"{LMS_BASE_URL}/lib/ajax/service.php",
+                    params={"sesskey": sesskey},
+                    json=[{"index": 0,
+                           "methodname": "core_course_get_enrolled_courses_by_timeline_classification",
+                           "args": {"offset": 0, "limit": 50, "classification": "inprogress",
+                                    "sort": "fullname", "customfieldname": "", "customfieldvalue": ""}}],
+                    headers={**HEADERS, "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
+                )
+                return r.json()
 
-            # Список курсов
-            r = await client.post(
-                f"{LMS_BASE_URL}/lib/ajax/service.php",
-                params={"sesskey": sesskey},
-                json=[{"index": 0,
-                       "methodname": "core_course_get_enrolled_courses_by_timeline_classification",
-                       "args": {"offset": 0, "limit": 50, "classification": "inprogress",
-                                "sort": "fullname", "customfieldname": "", "customfieldvalue": ""}}],
-                headers={**HEADERS, "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
-            )
-            data = r.json()
+            data = await _fetch_courses_page(sesskey)
+            # Кэшированная сессия проходит проверку /my/ (не редиректит на логин),
+            # но sesskey для веб-сервиса отдельно может быть уже протухшим —
+            # Moodle тогда отвечает {"error": true, ...servicerequireslogin...}
+            # вместо списка курсов. Раньше это тихо читалось как "0 курсов",
+            # хотя занятия и задания были — перелогиниваемся один раз и повторяем.
+            if isinstance(data, list) and data and data[0].get("error"):
+                print(f"LMS: кэшированная сессия отклонена веб-сервисом "
+                      f"({data[0].get('exception', {}).get('errorcode')}), логинимся заново")
+                try:
+                    os.remove(LMS_SESSION_CACHE_FILE)
+                except FileNotFoundError:
+                    pass
+                sesskey = await _lms_login(client)
+                if not sesskey:
+                    raise LMSAuthError("не удалось получить sesskey после повторного логина")
+                data = await _fetch_courses_page(sesskey)
+
             courses = []
             if isinstance(data, list) and data and not data[0].get("error"):
                 courses = data[0].get("data", {}).get("courses", [])
@@ -212,8 +289,10 @@ async def fetch_lms_deadlines() -> tuple:
             print(f"LMS: заданий: {len(result)} (с дедлайном: {len(with_deadline)}, без даты: {len(without_deadline)}), выполнено: {len(completed_ids)}")
             return result, completed_ids
 
+        except LMSAuthError:
+            raise
         except Exception as e:
-            print(f"LMS fetch failed: {e}")
+            print(f"LMS fetch failed: {e!r}")
             import traceback
             traceback.print_exc()
             return [], set()
@@ -263,24 +342,12 @@ async def fetch_lms_grades_changes() -> list:
     print("LMS grades: проверяем оценки...")
     changes = []
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=HEADERS) as client:
+    async with direct_async_client(timeout=30, follow_redirects=True, headers=HEADERS) as client:
         try:
-            r = await client.get(f"{LMS_BASE_URL}/login/index.php")
-            lt = re.search(r'name="logintoken"\s+value="([^"]+)"', r.text)
-            login_token = lt.group(1) if lt else ""
-            await client.post(f"{LMS_BASE_URL}/login/index.php", data={
-                "username": LMS_USERNAME, "password": LMS_PASSWORD,
-                "logintoken": login_token, "anchor": "",
-            }, headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded",
-                        "Referer": f"{LMS_BASE_URL}/login/index.php", "Origin": LMS_BASE_URL})
-
-            r_my = await client.get(f"{LMS_BASE_URL}/my/")
-            if "login" in str(r_my.url).lower():
+            sesskey = await _lms_login(client)
+            if not sesskey:
                 print("LMS grades: логин не удался")
                 return []
-
-            sk = re.search(r'"sesskey":"([^"]+)"', r_my.text)
-            sesskey = sk.group(1) if sk else ""
 
             r_courses = await client.post(
                 f"{LMS_BASE_URL}/lib/ajax/service.php",
@@ -356,7 +423,7 @@ async def fetch_lms_grades_changes() -> list:
             return changes
 
         except Exception as e:
-            print(f"LMS grades check error: {e}")
+            print(f"LMS grades check error: {e!r}")
             import traceback
             traceback.print_exc()
             return []

@@ -262,7 +262,10 @@ def tasks_list_filtered(tasks: list, filter_type: str) -> str:
                         _when = f"{_time_str} (ожидает)"
                 except Exception:
                     _when = "—"
-                if _times == 1 or _interval == 0:
+                if _times <= 0:
+                    # Отработало (повторы кончились) — висит, пока не закроешь.
+                    _when = "отработало, ждёт закрытия"
+                if _times <= 1 or _interval == 0:
                     _repeat = ""
                 elif _interval < 60:
                     _repeat = f", каждые {_interval} мин × {_times}"
@@ -326,15 +329,31 @@ def _lesson_emoji(lesson: dict) -> str:
     return "🔷"
 
 
+def is_lxp_lesson(lesson: dict) -> bool:
+    """LXP — асинхронный материал без живого занятия (можно смотреть когда
+    угодно), а не обычная пара с конкретным временем. location обычно
+    буквально "LXP", но иногда пометка есть только в названии/описании."""
+    loc = _sl(lesson.get("location"))
+    name = _sl(lesson.get("name")) + " " + _sl(lesson.get("course_name"))
+    desc = _sl(lesson.get("description"))
+    return "lxp" in loc or "lxp" in name or "lxp" in desc
+
+
+def lxp_tag(lesson: dict) -> str:
+    """Короткая читаемая пометка для строк расписания — не полагаемся только
+    на цвет эмодзи (🔵), а прямо пишем "LXP" рядом, чтобы было однозначно
+    видно, что это не обычная пара с конкретным временем."""
+    return " · LXP" if is_lxp_lesson(lesson) else ""
+
+
 def _lesson_suffix(lesson: dict) -> str:
     desc = _s(lesson.get("description"))
-    location = _sl(lesson.get("location"))
     parts = []
     if desc:
         dl = desc.lower()
         if any(x in dl for x in ["лекц", "практ", "семин", "лаб", "вебин", "test", "revision", "achievement", "занятие"]):
             parts.append(_esc_md(desc))
-    if "lxp" in location:
+    if is_lxp_lesson(lesson):
         parts.append("LXP")
     return ". ".join(parts) if parts else ""
 
@@ -523,42 +542,89 @@ def _esc(text: str) -> str:
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _quote(body: str) -> str:
+    """Единое оформление тела уведомления — цитатой (Telegram <blockquote>),
+    сворачиваемой если длинная. Контент не обрезаем никогда — если письмо/
+    сообщение не влезет в лимит Telegram на одно сообщение, send_with_retry
+    в scheduler.py сам разобьёт его на несколько сообщений подряд."""
+    return f"<blockquote expandable>{body}</blockquote>" if body else ""
+
+
 def new_email_message(email_data: dict) -> str:
-    """Красивое письмо — HTML формат."""
+    """Красивое письмо — HTML формат, единый стиль со всеми уведомлениями."""
     sender = _esc(email_data.get("sender", ""))
     subject = _esc(email_data.get("subject", ""))
     date = _esc(email_data.get("date", ""))
-    body = _esc(email_data.get("body", "")[:600])
+    body = _esc(email_data.get("body", ""))
+    mailbox_label = "Gmail" if email_data.get("source") == "gmail" else "Яндекс Почта"
 
     return (
-        f"📧 <b>Яндекс Почта</b>\n"
-        f"\n"
+        f"📧 <b>{mailbox_label}</b>\n"
         f"📧 <b>Новое письмо</b>\n"
         f"{'─' * 20}\n"
         f"👤 <b>{sender}</b>\n"
         f"📋 {subject}\n"
         f"🕐 {date}\n"
         f"{'─' * 20}\n\n"
-        f"{body}"
+        f"{_quote(body)}"
     )
 
 
 def new_messenger_message(msg_data: dict) -> str:
-    """Красивое сообщение из Яндекс Мессенджера — HTML формат."""
+    """Красивое сообщение из Яндекс Мессенджера — HTML формат, единый стиль."""
     sender = _esc(msg_data.get("sender", ""))
     date = _esc(msg_data.get("date", ""))
     content = msg_data.get("text") or msg_data.get("preview", "")
-    content = _esc(content[:600])
+    content = _esc(content)
 
     return (
         f"💬 <b>Яндекс Мессенджер</b>\n"
-        f"\n"
         f"💬 <b>Новое сообщение</b>\n"
         f"{'─' * 20}\n"
         f"👤 <b>{sender}</b>\n"
         f"🕐 {date}\n"
         f"{'─' * 20}\n\n"
-        f"{content}"
+        f"{_quote(content)}"
+    )
+
+
+def new_vk_message(text: str, chat_label: str = "") -> str:
+    """Дословная пересылка сообщения из беседы ВК — тот же единый стиль
+    (заголовок / подзаголовок / разделитель / цитата), что у почты и
+    мессенджера. text уже очищен и HTML-экранирован вызывающей стороной
+    (scheduler.py: _decode_vk_links + экранирование спецсимволов)."""
+    meta_line = f"👥 {chat_label}\n" if chat_label else ""
+    return (
+        f"💬 <b>ВКонтакте</b>\n"
+        f"💬 <b>Новое сообщение</b>\n"
+        f"{'─' * 20}\n"
+        f"{meta_line}"
+        f"{'─' * 20}\n\n"
+        f"{_quote(text)}"
+    )
+
+
+def new_netology_notification_message(notif: dict) -> str:
+    """Уведомление из личного кабинета Нетологии (координатор курса,
+    анонсы комьюнити) — HTML формат, как письма/сообщения."""
+    title = _esc(notif.get("title", ""))
+    program = _esc(notif.get("program_title", ""))
+    creator = _esc(notif.get("creator", ""))
+    date = _esc(notif.get("date", ""))
+    text = _esc(notif.get("text", ""))
+
+    creator_line = f"👤 {creator}\n" if creator else ""
+    program_line = f"📚 {program}\n" if program else ""
+
+    return (
+        f"🎓 <b>Нетология</b>\n"
+        f"📋 <b>{title}</b>\n"
+        f"{'─' * 20}\n"
+        f"{creator_line}"
+        f"{program_line}"
+        f"🕐 {date}\n"
+        f"{'─' * 20}\n\n"
+        f"{_quote(text)}"
     )
 
 
