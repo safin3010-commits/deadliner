@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
 Триггеры «говорить или молчать» — шаг 8 плана (design/mentor_agent_architecture.md,
-раздел 6). Сейчас работает в ТЕНЕВОМ режиме: считает поводы и решение, пишет
-их в data/agent.db → trigger_log, но ничего не отправляет. После недели
-наблюдения по журналу (`agent_triggers.py report`) калибруем веса и только
-потом включаем отправку (SHADOW = False).
+раздел 6). Считает поводы и решение, пишет их в data/agent.db → trigger_log.
+Отправка включена 2026-10-02 по решению пользователя, с жёсткими рамками:
+только «send_now», не больше MAX_PER_DAY инициативных сообщений в сутки, не
+чаще раза в MIN_GAP_H часов, все поводы склеиваются в одно сообщение; каждый
+👎 под таким сообщением за 7 дней поднимает порог на DISLIKE_PENALTY
+(самокалибровка). SHADOW = True — снова только журнал.
 
 Скоринг (стартовые веса из ревью, калибровать по журналу):
   score = base + urgency(0..25) + importance(0..15) + actionability(0..10)
@@ -26,7 +28,11 @@ os.chdir(PROJECT_DIR)
 
 from config import UFA_TZ
 
-SHADOW = True
+SHADOW = False
+MAX_PER_DAY = 2
+MIN_GAP_H = 3
+SEND_THRESHOLD = 75
+DISLIKE_PENALTY = 10
 QUIET_FROM, QUIET_TO = 23, 8
 REPEAT_WINDOW_H = 24
 
@@ -71,13 +77,25 @@ def collect(now) -> list[dict]:
             out.append({"reason": "grade_low" if low else "grade_new", "fp": _fp("grade", e["id"]),
                         "urgency": 10, "importance": 15 if low else 5, "actionability": 5,
                         "text": f"Оценка {value} — {what}" + (f" ({e['course']})" if e["title"] and e["course"] else "")})
-        for e in conn.execute("SELECT * FROM raw_events WHERE source='vk' AND COALESCE(occurred_at, observed_at) >= ? "
-                              "AND (body LIKE '%перенос%' OR body LIKE '%отмен%')", (since,)):
-            out.append({"reason": "schedule_change", "fp": _fp("vk", e["id"]),
-                        "urgency": 20, "importance": 10, "actionability": 5,
-                        "text": f"ВК: {(e['body'] or '')[:120]}"})
+
     finally:
         conn.close()
+
+    # Переносы/отмены — только уже извлечённые факты (mentor_checkin пишет их
+    # в schedule_overrides.json из беседы ВК) и только на сегодня-завтра:
+    # просто слово «перенос» в общем чате — не повод писать.
+    try:
+        with open(os.path.join(PROJECT_DIR, "data", "schedule_overrides.json"), encoding="utf-8") as f:
+            overrides = json.load(f)
+    except Exception:
+        overrides = []
+    days = {now.strftime("%d.%m"), (now + datetime.timedelta(days=1)).strftime("%d.%m")}
+    for o in overrides:
+        added = o.get("added_at") or ""
+        if added >= since and any(d in o.get("note", "") for d in days):
+            out.append({"reason": "schedule_change", "fp": _fp("override", o.get("note")),
+                        "urgency": 20, "importance": 10, "actionability": 5,
+                        "text": f"Изменение расписания: {o['note']}"})
 
     model = build_model(now)
     for i in model["deadlines"]:
@@ -115,14 +133,41 @@ def score(c: dict, state: dict | None, now) -> float:
     return s + novelty - repetition - quiet
 
 
-def decide(s: float) -> str:
-    return "send_now" if s >= 75 else "to_brief" if s >= 45 else "silent"
+def _threshold() -> float:
+    """Порог растёт на DISLIKE_PENALTY за каждый 👎 под инициативным
+    сообщением за 7 дней (feedback_id из initiative_sent)."""
+    from agent_db import connect
+    since = (_now() - datetime.timedelta(days=7)).isoformat()
+    conn = connect()
+    try:
+        ids = set()
+        for r in conn.execute("SELECT fingerprints FROM initiative_sent WHERE at >= ?", (since,)):
+            try:
+                ids.add(json.loads(r["fingerprints"]).get("feedback_id"))
+            except Exception:
+                pass
+    finally:
+        conn.close()
+    dislikes = 0
+    try:
+        with open(os.path.join(PROJECT_DIR, "data", "mentor_feedback.jsonl"), encoding="utf-8") as f:
+            for line in f:
+                r = json.loads(line)
+                dislikes += r.get("feedback_id") in ids and r.get("rating") == "down"
+    except FileNotFoundError:
+        pass
+    return min(SEND_THRESHOLD + DISLIKE_PENALTY * dislikes, 150)
+
+
+def decide(s: float, threshold: float = SEND_THRESHOLD) -> str:
+    return "send_now" if s >= threshold else "to_brief" if s >= 45 else "silent"
 
 
 def run() -> list[dict]:
     from agent_db import connect
     now = _now()
     cands = collect(now)
+    threshold = _threshold()
     results = []
     conn = connect()
     try:
@@ -130,7 +175,7 @@ def run() -> list[dict]:
             for c in cands:
                 state = conn.execute("SELECT * FROM notification_state WHERE fingerprint=?", (c["fp"],)).fetchone()
                 sc = score(c, state, now)
-                d = decide(sc)
+                d = decide(sc, threshold)
                 # Один и тот же повод логируем раз в сутки, а не на каждом прогоне.
                 seen = conn.execute("SELECT 1 FROM trigger_log WHERE fingerprint=? AND at >= ?",
                                     (c["fp"], (now - datetime.timedelta(hours=REPEAT_WINDOW_H)).isoformat())).fetchone()
@@ -138,14 +183,75 @@ def run() -> list[dict]:
                     conn.execute("INSERT INTO trigger_log(at, fingerprint, reason, score, decision, shadow, details) "
                                  "VALUES (?,?,?,?,?,?,?)",
                                  (now.isoformat(timespec="seconds"), c["fp"], c["reason"], sc, d, int(SHADOW), c["text"]))
-                if not SHADOW and d == "send_now":
-                    conn.execute("INSERT INTO notification_state(fingerprint, last_sent, times_sent) VALUES (?,?,1) "
-                                 "ON CONFLICT(fingerprint) DO UPDATE SET last_sent=excluded.last_sent, "
-                                 "times_sent=times_sent+1", (c["fp"], now.isoformat()))
                 results.append({**c, "score": sc, "decision": d, "logged": not seen})
     finally:
         conn.close()
+    if not SHADOW:
+        send_initiative([r for r in results if r["decision"] == "send_now"], now)
     return results
+
+
+def _can_send(now) -> bool:
+    from agent_db import connect
+    conn = connect()
+    try:
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        today = conn.execute("SELECT COUNT(*) FROM initiative_sent WHERE at >= ?", (day_start,)).fetchone()[0]
+        last = conn.execute("SELECT MAX(at) FROM initiative_sent").fetchone()[0]
+    finally:
+        conn.close()
+    if today >= MAX_PER_DAY:
+        return False
+    if last and (now - datetime.datetime.fromisoformat(last)).total_seconds() < MIN_GAP_H * 3600:
+        return False
+    return True
+
+
+INITIATIVE_SYSTEM = (
+    "Ты — личный наставник студента: пишешь в Telegram по-русски, на «ты», живо и коротко "
+    "(2–4 предложения), Telegram HTML (только <b>/<i>). Пишешь не по расписанию, а потому что "
+    "появился повод — сразу к делу: что случилось и что конкретно сделать. Без паники, без "
+    "морали, факты бери только из сообщения, даты не меняй."
+)
+
+
+def send_initiative(items: list[dict], now) -> bool:
+    """Все поводы — одним сообщением, в рамках лимитов."""
+    if not items or not _can_send(now):
+        return False
+    import uuid
+    from agent_db import connect
+    from claude_session import run_claude_oneshot
+    from mentor_checkin import send_telegram
+    from mentor_context import build_checkin_pack, record_sent
+    reasons = "\n".join(f"- {i['text']}" for i in items)
+    pack = build_checkin_pack("initiative")
+    text, err = run_claude_oneshot(
+        f"ПОВОДЫ НАПИСАТЬ СЕЙЧАС:\n{reasons}\n\nКонтекст (код, точное):\n{pack}",
+        INITIATIVE_SYSTEM, 180, "claude-sonnet-5", "initiative")
+    if err or not text:
+        print(f"agent_triggers: не сформулировал ({err})")
+        return False
+    fid = uuid.uuid4().hex[:10]
+    try:
+        send_telegram(text, feedback_id=fid)
+    except Exception as e:
+        print(f"agent_triggers: не отправил: {e!r}")
+        return False
+    record_sent("initiative", text, fid)
+    conn = connect()
+    try:
+        with conn:
+            conn.execute("INSERT INTO initiative_sent(at, fingerprints, text) VALUES (?,?,?)",
+                         (now.isoformat(timespec="seconds"),
+                          json.dumps({"fps": [i["fp"] for i in items], "feedback_id": fid}), text))
+            for i in items:
+                conn.execute("INSERT INTO notification_state(fingerprint, last_sent, times_sent) VALUES (?,?,1) "
+                             "ON CONFLICT(fingerprint) DO UPDATE SET last_sent=excluded.last_sent, "
+                             "times_sent=times_sent+1", (i["fp"], now.isoformat()))
+    finally:
+        conn.close()
+    return True
 
 
 def report(days: int = 7) -> str:

@@ -180,12 +180,80 @@ def _vk_schedule() -> str:
     return "\n\n".join(parts)
 
 
-def _memory() -> str:
+def _today_events(now) -> str:
+    """Новые оценки и новые задания за сутки — раньше наставник мог
+    наткнуться на них сам, читая файлы; в сводке их не было."""
     try:
-        from scheduler import get_ai_memory_recap
-        return get_ai_memory_recap()[:2500]
+        from agent_db import connect
     except Exception:
         return ""
+    since = (now - datetime.timedelta(hours=26)).isoformat(timespec="seconds")
+    conn = connect()
+    try:
+        rows = conn.execute(
+            "SELECT kind, course, title, body, effective_at FROM raw_events "
+            "WHERE kind IN ('grade','task_new') AND COALESCE(occurred_at, observed_at) >= ? "
+            "ORDER BY id", (since,)).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        if r["kind"] == "grade":
+            if re.fullmatch(r"оценка 0(\.0+)?", (r["body"] or "").strip()):
+                continue  # 0 в Modeus — «не выставлено», не двойка
+            out.append(f"- оценка: {r['title'] or r['course']} — {r['body']}")
+        else:
+            dl = f", срок {r['effective_at'][8:10]}.{r['effective_at'][5:7]}" if r["effective_at"] else ""
+            out.append(f"- новое задание: {r['title']} ({r['course'] or '—'}{dl})")
+    return "\n".join(out[:15])
+
+
+def _needs_reply(now) -> str:
+    """Письма/сообщения, на которые, по разбору (scripts/agent_extract.py),
+    нужно ответить — за последние 3 дня."""
+    try:
+        from agent_db import connect
+    except Exception:
+        return ""
+    since = (now - datetime.timedelta(days=3)).isoformat(timespec="seconds")
+    conn = connect()
+    try:
+        rows = conn.execute(
+            "SELECT e.source, e.sender, e.title, e.body, x.result_json FROM extractions x "
+            "JOIN raw_events e ON e.id = x.event_id WHERE e.observed_at >= ?", (since,)).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        res = json.loads(r["result_json"] or "{}")
+        if res.get("needs_reply"):
+            out.append(f"- {r['source']}, {_clip(r['sender'] or '', 40)}: {_clip(res.get('summary') or r['title'] or r['body'] or '', 160)}")
+    return "\n".join(out[:8])
+
+
+def _diary(days: int) -> str:
+    try:
+        from agent_db import get_diary
+        return "\n".join(f"{d['date'][8:10]}.{d['date'][5:7]}: {d['text']}" for d in get_diary(days))
+    except Exception:
+        return ""
+
+
+def _memory() -> str:
+    parts = []
+    try:
+        from agent_db import confirmed_profile
+        prof = confirmed_profile()
+        if prof:
+            parts.append("Подтверждено им самим:\n" + "\n".join(f"- {p}" for p in prof))
+    except Exception:
+        pass
+    try:
+        from scheduler import get_ai_memory_recap
+        parts.append(get_ai_memory_recap()[:2500])
+    except Exception:
+        pass
+    return "\n\n".join(p for p in parts if p)
 
 
 def _knowledge() -> str:
@@ -200,13 +268,14 @@ def _knowledge() -> str:
 
 # Какие блоки нужны какому слоту — модель получает только релевантное.
 SLOT_BLOCKS = {
-    "morning":        ["today", "deadlines", "overdue", "reminders", "commitments", "weather", "comms", "knowledge"],
+    "morning":        ["today", "new_events", "deadlines", "overdue", "reminders", "commitments", "needs_reply", "diary", "weather", "comms", "knowledge"],
     "midmorning":     ["today", "deadlines", "reminders", "done_today", "activity"],
     "schedule_focus": ["today", "tomorrow", "vk", "knowledge"],
     "motivation":     ["deadlines", "overdue", "done_today", "activity"],
-    "evening":        ["done_today", "tomorrow", "deadlines", "overdue", "commitments", "activity", "study", "comms"],
-    "winddown":       ["tomorrow", "deadlines", "overdue", "reminders", "commitments", "done_today"],
-    "weekly":         ["activity", "done_today", "overdue", "deadlines", "commitments", "study"],
+    "evening":        ["done_today", "new_events", "tomorrow", "deadlines", "overdue", "commitments", "needs_reply", "activity", "study", "comms"],
+    "winddown":       ["tomorrow", "new_events", "deadlines", "overdue", "reminders", "commitments", "needs_reply", "done_today"],
+    "initiative":     ["today", "tomorrow", "new_events", "deadlines", "overdue", "commitments", "needs_reply"],
+    "weekly":         ["diary_week", "activity", "commitments_week", "grades_week", "done_today", "overdue", "deadlines", "commitments", "study"],
 }
 
 TITLES = {
@@ -223,7 +292,51 @@ TITLES = {
     "vk": "ВК: ИЗМЕНЕНИЯ РАСПИСАНИЯ",
     "knowledge": "ОРГФАКТЫ С ВЕБИНАРОВ ПО СЕГОДНЯШНИМ ПРЕДМЕТАМ",
     "commitments": "ЕГО ОБЕЩАНИЯ (сам подтвердил; если срок прошёл — мягко спроси, как дела)",
+    "new_events": "НОВОЕ ЗА СУТКИ: ОЦЕНКИ И ЗАДАНИЯ",
+    "needs_reply": "ЖДУТ ЕГО ОТВЕТА (письма/сообщения преподавателей и т.п.)",
+    "diary": "ДНЕВНИК ПОСЛЕДНИХ ДНЕЙ (сжатые итоги)",
+    "diary_week": "ДНЕВНИК НЕДЕЛИ (сжатые итоги по дням)",
+    "commitments_week": "ОБЕЩАНИЯ ЗА НЕДЕЛЮ: ВЫПОЛНЕНО / ПРОПУЩЕНО",
+    "grades_week": "ОЦЕНКИ ЗА НЕДЕЛЮ",
 }
+
+
+def _commitments_week(now) -> str:
+    try:
+        from agent_db import connect
+    except Exception:
+        return ""
+    since = (now - datetime.timedelta(days=7)).isoformat(timespec="seconds")
+    conn = connect()
+    try:
+        rows = conn.execute("SELECT action, status, due_at FROM commitments WHERE created_at >= ? "
+                            "AND status IN ('open','done','cancelled')", (since,)).fetchall()
+    finally:
+        conn.close()
+    today = now.date().isoformat()
+    out = []
+    for r in rows:
+        st = {"done": "выполнено", "cancelled": "снято"}.get(r["status"], "открыто")
+        if r["status"] == "open" and r["due_at"] and r["due_at"][:10] < today:
+            st = "СРОК ПРОШЁЛ, не выполнено"
+        out.append(f"- {r['action']}: {st}")
+    return "\n".join(out)
+
+
+def _grades_week(now) -> str:
+    try:
+        from agent_db import connect
+    except Exception:
+        return ""
+    since = (now - datetime.timedelta(days=7)).isoformat(timespec="seconds")
+    conn = connect()
+    try:
+        rows = conn.execute("SELECT course, title, body FROM raw_events WHERE kind='grade' "
+                            "AND COALESCE(occurred_at, observed_at) >= ? ORDER BY id", (since,)).fetchall()
+    finally:
+        conn.close()
+    return "\n".join(f"- {r['course'] or ''} {r['title'] or ''}: {r['body']}" for r in rows
+                     if not re.fullmatch(r"оценка 0(\.0+)?", (r["body"] or "").strip()))
 
 
 def build_checkin_pack(slot: str, extra_blocks: list[str] | None = None) -> str:
@@ -248,6 +361,12 @@ def build_checkin_pack(slot: str, extra_blocks: list[str] | None = None) -> str:
         "vk": _vk_schedule,
         "knowledge": _knowledge,
         "commitments": lambda: _commitments_block(),
+        "new_events": lambda: _today_events(now),
+        "needs_reply": lambda: _needs_reply(now),
+        "diary": lambda: _diary(3),
+        "diary_week": lambda: _diary(7),
+        "commitments_week": lambda: _commitments_week(now),
+        "grades_week": lambda: _grades_week(now),
     }
     keys = list(SLOT_BLOCKS.get(slot, ["today", "deadlines", "overdue"]))
     for k in extra_blocks or []:
@@ -330,7 +449,7 @@ def build_chat_pack(user_text: str) -> str:
 
     try:
         from agent_db import recent_dialog, search_events, search_knowledge
-        dialog = recent_dialog(limit=10)
+        dialog = recent_dialog(limit=30, hours=72)
         if dialog:
             parts.append("=== НЕДАВНИЙ ДИАЛОГ (для контекста продолжений) ===\n" + "\n".join(
                 f"{'Он' if d['role'] == 'user' else 'Ты'} ({d['at'][11:16]}): {_clip(d['text'], 300)}" for d in dialog))
@@ -356,6 +475,12 @@ def build_chat_pack(user_text: str) -> str:
     commitments = _commitments_block()
     if commitments:
         parts.append(f"=== ЕГО ОТКРЫТЫЕ ОБЕЩАНИЯ ===\n{commitments}")
+    diary = _diary(3)
+    if diary:
+        parts.append(f"=== ДНЕВНИК ПОСЛЕДНИХ ДНЕЙ ===\n{diary}")
+    mem = _memory()
+    if mem:
+        parts.append(f"=== ПАМЯТЬ О НЁМ ===\n{mem[:1800]}")
     study = _study_analysis(now)
     if study:
         parts.append(f"=== БАЛЛЫ И ПОСЕЩАЕМОСТЬ ===\n{study[:1500]}")

@@ -843,6 +843,61 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(f"Не получилось вернуть: {result['error']}")
         return
 
+    if data.startswith("pc:"):
+        # Наблюдение из недельного итога: в память — только после подтверждения.
+        from agent_db import decide_profile_claim
+        try:
+            _, cid, status = data.split(":")
+            row = decide_profile_claim(int(cid), status)
+        except ValueError:
+            row = None
+        await query.edit_message_reply_markup(reply_markup=None)
+        if row:
+            await query.message.reply_text("🧠 Запомнил." if status == "confirmed" else "Ок, не запоминаю.")
+        return
+
+    if data.startswith("xt:"):
+        # Срок, найденный в письме/сообщении (scripts/agent_extract.py).
+        import sys as _sys, os as _os
+        _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "scripts"))
+        from agent_extract import accept_proposal, reject_proposal
+        from html import escape as _h
+        _, eid, action = (data.split(":") + ["", ""])[:3]
+        await query.edit_message_reply_markup(reply_markup=None)
+        if action == "add":
+            task = accept_proposal(int(eid))
+            if task:
+                await query.message.reply_text(f"✅ Завёл задачу: <b>{_h(task['title'])}</b>", parse_mode="HTML")
+            else:
+                await query.message.reply_text("Уже обработано.")
+        else:
+            reject_proposal(int(eid))
+        return
+
+    if data.startswith("deep:"):
+        # «🔎 Подробнее в материалах» под ответом из сводки.
+        question = context.user_data.pop(data.split(":", 1)[1], None)
+        await query.edit_message_reply_markup(reply_markup=None)
+        if not question:
+            await query.message.reply_text("Вопрос устарел — задай его ещё раз.")
+            return
+        from bot.smart_intent import deep_answer_text, _split_message
+        from agent_db import add_dialog_message
+        msg = await query.message.reply_text("🔎 Ищу в материалах курса…")
+        answer = await deep_answer_text(question)
+        add_dialog_message("assistant", answer)
+        import re as _re
+        for i, chunk in enumerate(_split_message(answer)):
+            try:
+                if i == 0:
+                    await msg.edit_text(chunk, parse_mode="HTML")
+                else:
+                    await query.message.reply_text(chunk, parse_mode="HTML")
+            except Exception:
+                plain = _re.sub(r"</?[a-zA-Z][^>]*>", "", chunk)
+                await (msg.edit_text(plain) if i == 0 else query.message.reply_text(plain))
+        return
+
     if data.startswith("cm:"):
         # Обещания: подтверждение кандидата / закрытие открытого (agent_db).
         from html import escape as _h

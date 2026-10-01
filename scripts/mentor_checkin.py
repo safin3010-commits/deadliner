@@ -144,10 +144,15 @@ SLOTS = {
     },
     "weekly": {
         "focus": (
-            "Воскресенье — итог недели целиком: как прошла неделя, где просадка по баллам/"
-            "посещаемости/просрочкам, на что сделать упор на следующей неделе. 4–6 предложений. "
-            "Сверься со своими прошлыми сообщениями и памятью: если что-то предсказывал или "
-            "обещал проверить и это разошлось с фактами — прямо отметь."
+            "Воскресенье — глубокий итог недели. Опирайся на дневник недели, обещания (что "
+            "выполнено, что пропущено), оценки, активность и баллы. Дай честную картину: что "
+            "получилось, где просадка, какие обещания сорвались и почему это важно, и КОНКРЕТНЫЙ "
+            "план на следующую неделю (2–4 пункта с днями, опираясь на дедлайны). 6–10 предложений. "
+            "Если что-то из прошлых твоих сообщений разошлось с фактами — прямо отметь.\n\n"
+            "После основного текста — отдельной строкой ровно ===PROFILE=== и затем 0–3 строки: "
+            "устойчивые наблюдения о нём, которые стоит запомнить на будущее (как он работает, что "
+            "помогает, что мешает), каждое — одна фраза, только если подкреплено фактами недели. "
+            "Он подтвердит или отклонит их кнопкой — не выдумывай ради количества."
         ),
         "need_study_analysis": True, "need_weather": False, "need_vk_schedule": False,
     },
@@ -705,6 +710,25 @@ def send_telegram(text: str, feedback_id: str = ""):
         r2.raise_for_status()
 
 
+def send_profile_claim(claim: str):
+    """Наблюдение недельного итога попадает в память только после «Да»
+    (agent_db.profile_claims, обработчик pc: в bot/handlers.py)."""
+    import json as _json
+    from html import escape
+    from agent_db import add_profile_claim
+    cid = add_profile_claim(claim)
+    markup = _json.dumps({"inline_keyboard": [[
+        {"text": "✅ Верно, запомни", "callback_data": f"pc:{cid}:confirmed"},
+        {"text": "✖️ Нет", "callback_data": f"pc:{cid}:rejected"},
+    ]]})
+    try:
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                      data={"chat_id": MY_TELEGRAM_ID, "parse_mode": "HTML", "reply_markup": markup,
+                            "text": f"🧠 Я заметил: <i>{escape(claim)}</i>\nЗапомнить это о тебе?"}, timeout=20)
+    except Exception as e:
+        log(f"profile claim: не отправлено: {e!r}")
+
+
 def _build_catchup_block(missed: list) -> str:
     if not missed:
         return ""
@@ -748,7 +772,8 @@ def main():
     )
     system_prompt = PERSONA.format(user_name=USER_NAME) + "\n\n" + OUTPUT_RULE
     text, reason = run_claude_oneshot(
-        user_prompt, system_prompt, timeout=300, model=CLAUDE_MODEL_SMART, purpose=f"checkin_{slot}",
+        user_prompt, system_prompt, timeout=420 if slot == "weekly" else 300,
+        model=CLAUDE_MODEL_SMART, purpose=f"checkin_{slot}",
     )
     text = _strip_preamble(text) if text else text
     if not text:
@@ -757,8 +782,16 @@ def main():
             record_missed_checkin(slot, reason)
         return
 
+    profile_claims = []
+    if "===PROFILE===" in text:
+        text, tail = text.split("===PROFILE===", 1)
+        text = text.strip()
+        profile_claims = [l.strip(" -•\t") for l in tail.strip().splitlines() if len(l.strip(" -•\t")) > 10][:3]
+
     if DRY_RUN:
         print(f"--- PACK ({len(user_prompt)} симв.) ---\n{user_prompt}\n\n--- ОТВЕТ ---\n{text}")
+        if profile_claims:
+            print("--- НАБЛЮДЕНИЯ ---\n" + "\n".join(profile_claims))
         return
 
     import uuid
@@ -771,6 +804,9 @@ def main():
         log(f"ошибка отправки в telegram: {e!r}")
         record_missed_checkin(slot, "не удалось отправить в telegram")
         return
+
+    for claim in profile_claims:
+        send_profile_claim(claim)
 
     # Окно на столе Claude больше не пишет (решение пользователя 2026-10-02:
     # выводы в пару предложений не стоили ~14–240 тыс. токенов за раз) —

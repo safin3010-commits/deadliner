@@ -41,7 +41,7 @@ from config import UFA_TZ
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(PROJECT_DIR, "data", "agent.db")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS raw_events (
@@ -135,6 +135,41 @@ CREATE TABLE IF NOT EXISTS trigger_log (
 """
 
 
+_SCHEMA_V2 = """
+-- Разбор писем/сообщений дешёвой моделью: результат кэшируется по событию
+-- и версии экстрактора (повторно не платим за то же письмо).
+CREATE TABLE IF NOT EXISTS extractions (
+    event_id    INTEGER PRIMARY KEY REFERENCES raw_events(id),
+    version     TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    proposal_status TEXT,             -- NULL|proposed|accepted|rejected — предложение завести задачу
+    created_at  TEXT NOT NULL
+);
+-- Дневник: сжатый итог дня (ночью, дешёвая модель) — долгая память без
+-- пересылки всей истории.
+CREATE TABLE IF NOT EXISTS diary (
+    date       TEXT PRIMARY KEY,
+    text       TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+-- Что наставник «понял о тебе»: только после твоего подтверждения кнопкой.
+CREATE TABLE IF NOT EXISTS profile_claims (
+    id          INTEGER PRIMARY KEY,
+    text        TEXT NOT NULL,
+    status      TEXT NOT NULL,        -- candidate|confirmed|rejected
+    created_at  TEXT NOT NULL,
+    decided_at  TEXT
+);
+-- Инициативные сообщения по поводу (триггеры): учёт для лимитов.
+CREATE TABLE IF NOT EXISTS initiative_sent (
+    id          INTEGER PRIMARY KEY,
+    at          TEXT NOT NULL,
+    fingerprints TEXT NOT NULL,
+    text        TEXT NOT NULL
+);
+"""
+
+
 def _now_iso() -> str:
     return datetime.datetime.now(tz=UFA_TZ).isoformat(timespec="seconds")
 
@@ -154,13 +189,40 @@ def connect() -> sqlite3.Connection:
             pass
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version < SCHEMA_VERSION:
+        if version >= 1:
+            # Бэкап перед миграцией (решение ревью).
+            import shutil
+            try:
+                shutil.copy2(DB_PATH, f"{DB_PATH}.v{version}.bak")
+            except OSError:
+                pass
         with conn:
-            conn.executescript(_SCHEMA_V1)
+            if version < 1:
+                conn.executescript(_SCHEMA_V1)
+            if version < 2:
+                conn.executescript(_SCHEMA_V2)
             conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     return conn
 
 
 # ─── запись ─────────────────────────────────────────────────────────
+
+def normalize_ts(value) -> str | None:
+    """Время из любого источника → ISO с поясом (письма приходят как
+    «01.10.2026 18:42» — строковые сравнения по датам иначе врут)."""
+    if not value:
+        return None
+    value = str(value).strip()
+    for fmt in (None, "%d.%m.%Y %H:%M", "%d.%m.%Y %H:%M:%S", "%d.%m.%Y"):
+        try:
+            dt = datetime.datetime.fromisoformat(value) if fmt is None else datetime.datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UFA_TZ)
+        return dt.astimezone(UFA_TZ).isoformat(timespec="seconds")
+    return None
+
 
 def record_event(source: str, kind: str, external_id: str | None = None, *,
                  title: str = "", body: str = "", sender: str = "", course: str = "",
@@ -173,6 +235,8 @@ def record_event(source: str, kind: str, external_id: str | None = None, *,
         payload = json.dumps([title, body, sender, course, url, effective_at, meta],
                              ensure_ascii=False, sort_keys=True)
         payload_hash = hashlib.sha1(payload.encode()).hexdigest()
+        occurred_at = normalize_ts(occurred_at)
+        effective_at = normalize_ts(effective_at) or effective_at
         ext = external_id or payload_hash
         now = _now_iso()
         conn = connect()
@@ -356,5 +420,68 @@ def list_commitments(status: str = "open", limit: int = 20) -> list[dict]:
         return [dict(r) for r in conn.execute(
             "SELECT * FROM commitments WHERE status=? ORDER BY COALESCE(due_at, '9999') LIMIT ?",
             (status, limit)).fetchall()]
+    finally:
+        conn.close()
+
+
+# ─── дневник и профиль ──────────────────────────────────────────────
+
+def save_diary(date: str, text: str):
+    conn = connect()
+    try:
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO diary(date, text, created_at) VALUES (?,?,?)",
+                         (date, text, _now_iso()))
+    finally:
+        conn.close()
+
+
+def get_diary(days: int = 3) -> list[dict]:
+    conn = connect()
+    try:
+        rows = conn.execute("SELECT date, text FROM diary ORDER BY date DESC LIMIT ?", (days,)).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in reversed(rows)]
+
+
+def has_diary(date: str) -> bool:
+    conn = connect()
+    try:
+        return conn.execute("SELECT 1 FROM diary WHERE date=?", (date,)).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def add_profile_claim(text: str) -> int:
+    conn = connect()
+    try:
+        with conn:
+            return conn.execute("INSERT INTO profile_claims(text, status, created_at) VALUES (?, 'candidate', ?)",
+                                (text, _now_iso())).lastrowid
+    finally:
+        conn.close()
+
+
+def decide_profile_claim(cid: int, status: str) -> dict | None:
+    if status not in ("confirmed", "rejected"):
+        return None
+    conn = connect()
+    try:
+        with conn:
+            row = conn.execute("SELECT * FROM profile_claims WHERE id=? AND status='candidate'", (cid,)).fetchone()
+            if not row:
+                return None
+            conn.execute("UPDATE profile_claims SET status=?, decided_at=? WHERE id=?", (status, _now_iso(), cid))
+            return dict(row) | {"status": status}
+    finally:
+        conn.close()
+
+
+def confirmed_profile() -> list[str]:
+    conn = connect()
+    try:
+        return [r["text"] for r in conn.execute(
+            "SELECT text FROM profile_claims WHERE status='confirmed' ORDER BY id").fetchall()]
     finally:
         conn.close()

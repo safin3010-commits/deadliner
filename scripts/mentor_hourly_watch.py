@@ -229,6 +229,19 @@ def agent_maintenance(old: dict | None, new: dict):
     except Exception as e:
         log(f"agent_db: ошибка синхронизации знаний: {e!r}")
     try:
+        import agent_extract
+        st = agent_extract.run()
+        if st["analyzed"] or st["proposals"]:
+            log(f"inbox: разобрано {st['analyzed']}, шум {st['noise']}, предложено задач {st['proposals']}")
+    except Exception as e:
+        log(f"inbox: ошибка разбора: {e!r}")
+    try:
+        import agent_diary
+        if agent_diary.ensure_yesterday():
+            log("дневник за вчера записан")
+    except Exception as e:
+        log(f"дневник: ошибка: {e!r}")
+    try:
         import agent_triggers
         res = agent_triggers.run()
         logged = [r for r in res if r["logged"]]

@@ -40,7 +40,7 @@ INTENT_PROMPT_TEMPLATE = """Ты — модуль разбора входящи�
 {{
   "items": [
     {{
-      "type": "task | reminder | recurring_reminder | complete | commitment | question | none",
+      "type": "task | reminder | recurring_reminder | complete | commitment | question | study | none",
       "title": "суть дела, без дат и служебных слов вроде 'напомни'/'сделай'",
       "deadline_iso": "YYYY-MM-DDTHH:MM:SS без часового пояса, или null",
       "reminder_at_iso": "YYYY-MM-DDTHH:MM:SS без часового пояса, или null",
@@ -51,6 +51,7 @@ INTENT_PROMPT_TEMPLATE = """Ты — модуль разбора входящи�
       "task_id": "id найденной активной задачи/напоминания из блока АКТИВНЫЕ ЗАДАЧИ, или null",
       "quote": "для commitment — дословная фраза пользователя с обещанием, иначе пустая строка",
       "answer_text": "прямой ответ пользователю или пустая строка",
+      "needs_files": "true, если для ответа на question данных ниже НЕ хватает и нужно искать в материалах (расшифровки вебинаров, конспекты, файлы); иначе false",
       "confidence": "high или low"
     }}
   ]
@@ -67,6 +68,8 @@ INTENT_PROMPT_TEMPLATE = """Ты — модуль разбора входящи�
 8. Несколько дел в одном сообщении ("купи молоко и позвони маме завтра") — несколько элементов items, у каждого свой type.
 9. ПРО ПРОДОЛЖЕНИЯ РАЗГОВОРА: если в сообщении не хватает сути (нет названия/темы — например "сделай каждые 3 часа напоминания" без указания о чём), сначала проверь, не продолжение ли это того, что только что обсуждалось в этой же сессии (ты помнишь предыдущие сообщения этого разговора) — если пользователь только что просил напомнить о чём-то конкретном, а этим сообщением уточняет частоту/срок/детали того же самого — возьми title из того предыдущего сообщения, не создавай второй пустой пункт и не спрашивай "что за напоминание". confidence="low" ставь только если ДАЖЕ с учётом истории разговора непонятно, к чему это относится.
 10. ПРО ДАТУ СОБЫТИЯ (только для reminder/recurring_reminder): если напоминание — о событии с собственной датой, которая НЕ совпадает с моментом напоминания ("напомни сегодня вечером, что 2 октября приём у ортодонта" → reminder_at_iso = сегодня вечер, event_date_iso = 2 октября), заполни event_date_iso датой события. Если дата события совпадает с днём напоминания или события как такового нет ("напоминай пить воду") — null. Дату события в title не дублируй.
+10a. type="study" — просьба объяснить/разобрать учебную тему или содержание вебинара/лекции ("объясни оконные функции", "что было на вебинаре 8 по БД", "давай продолжим учить ...", "проверь меня по теме ..."). title = тема. answer_text пустой — объяснение готовит отдельный режим по расшифровкам и конспектам.
+10b. Для type="question": если ответа в блоках данных нет или он неполный (например, подробности конкретного вебинара, требования преподавателя, чего нет в поиске) — needs_files=true и answer_text пустой. Если ответ в данных есть — needs_files=false.
 11. type="commitment" — пользователь САМ обещает что-то сделать к сроку, в первом лице и утвердительно: "сделаю лабу в пятницу", "завтра сдам тест", "напишу преподу вечером". title = что сделать (коротко), deadline_iso = к какому сроку (если назван; день без часа → 23:59 того дня), quote = дословная фраза. НЕ commitment: "надо бы", "может, в пятницу", "постараюсь", "подумаю", дедлайн курса ("лабу нужно сдать к пятнице" — это факт, не обещание), просьба напомнить (это reminder). Сомневаешься — confidence="low". Для commitment answer_text оставь ПУСТЫМ: пользователь сам подтвердит запись кнопкой, не пиши «записал». Обещание не заменяет другие пункты: если в том же сообщении есть вопрос — верни оба элемента.
 12. Только JSON, без пояснений до или после.
 
@@ -321,6 +324,7 @@ async def handle_free_text(update, context, text: str) -> None:
         return
 
     replies = []
+    deep_question = None   # был ответ из сводки → под ним кнопка «🔎 Подробнее»
     for item in data["items"]:
         itype = item.get("type")
         title = (item.get("title") or text).strip()
@@ -379,16 +383,89 @@ async def handle_free_text(update, context, text: str) -> None:
             interval_str = format_interval(reminder.get("interval_minutes", 0), times_left)
             replies.append(f"🔔 <b>{_esc_md(title)}</b> — {interval_str}, {times_str}")
 
+        elif itype == "study" or (itype == "question" and str(item.get("needs_files")).lower() == "true"):
+            # Подробный ответ по материалам (scripts/mentor_deep.py): нужные
+            # фрагменты расшифровок/конспектов находит код, модель отвечает
+            # без инструментов (~25–35 тыс. токенов; версия с Read/Grep
+            # блуждала по файлам и тратила ~1 млн).
+            await placeholder.edit_text("🔎 Ищу в материалах курса…")
+            replies.append(await deep_answer_text(text, study=(itype == "study")))
+
         elif itype in ("question", "none"):
             answer = (item.get("answer_text") or "").strip()
             if answer:
                 replies.append(answer)
+                if itype == "question":
+                    deep_question = text
 
     if replies:
-        await placeholder.edit_text("\n\n".join(replies), parse_mode="HTML")
-        add_dialog_message("assistant", "\n\n".join(replies))
+        full = "\n\n".join(replies)
+        markup = None
+        if deep_question:
+            import time as _time
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            token = f"dq_{int(_time.time() * 1000) & 0xFFFFFF}"
+            context.user_data[token] = deep_question
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton(
+                "🔎 Подробнее в материалах", callback_data=f"deep:{token}")]])
+        await _deliver(update, placeholder, full, markup)
+        add_dialog_message("assistant", full)
     else:
         await placeholder.delete()
+
+
+def _split_message(text: str, limit: int = 3900) -> list[str]:
+    """По абзацам/строкам, чтобы не резать посреди тега <b>…</b>."""
+    chunks, cur = [], ""
+    for para in text.split("\n"):
+        while len(para) > limit:
+            chunks.append(para[:limit]); para = para[limit:]
+        if len(cur) + len(para) + 1 > limit:
+            chunks.append(cur); cur = para
+        else:
+            cur = f"{cur}\n{para}" if cur else para
+    if cur:
+        chunks.append(cur)
+    return chunks or [""]
+
+
+async def deep_answer_text(question: str, study: bool = False) -> str:
+    """Обёртка над scripts/mentor_deep.deep_answer для бота (кнопка «🔎»,
+    режим обучения, запасной путь вопроса)."""
+    import asyncio
+    import os
+    import sys
+    scripts = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from mentor_deep import deep_answer
+    from agent_db import recent_dialog
+    dialog = "\n".join(f"{'Он' if d['role'] == 'user' else 'Ты'}: {d['text'][:300]}"
+                       for d in recent_dialog(limit=8, hours=24))
+    text, err = await asyncio.to_thread(deep_answer, question, dialog, study)
+    if err:
+        return f"❌ Не получилось разобрать по материалам ({err})."
+    return text
+
+
+async def _deliver(update, placeholder, text: str, markup=None) -> None:
+    """Длинные ответы (режим обучения) — несколькими сообщениями; если HTML
+    модели невалиден — тем же текстом без форматирования, но не теряем."""
+    import re
+    chunks = _split_message(text)
+    for i, chunk in enumerate(chunks):
+        kb = markup if i == len(chunks) - 1 else None
+        try:
+            if i == 0:
+                await placeholder.edit_text(chunk, parse_mode="HTML", reply_markup=kb)
+            else:
+                await update.message.reply_text(chunk, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            plain = re.sub(r"</?[a-zA-Z][^>]*>", "", chunk)
+            if i == 0:
+                await placeholder.edit_text(plain, reply_markup=kb)
+            else:
+                await update.message.reply_text(plain, reply_markup=kb)
 
 
 async def _propose_commitment(update, action: str, quote: str, due_iso: str | None, event_id) -> None:
