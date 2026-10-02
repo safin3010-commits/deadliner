@@ -519,7 +519,10 @@ async def sync_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for existing in tasks:
                 if str(existing.get("id")) == str(task_id):
                     found = True
-                    if existing.get("deadline") != t.get("deadline") and t.get("deadline"):
+                    if existing.get("deadline_overridden"):
+                        # Срок перенёс сам пользователь — дату с сайта только запоминаем.
+                        existing["source_deadline"] = t.get("deadline")
+                    elif existing.get("deadline") != t.get("deadline") and t.get("deadline"):
                         existing["deadline"] = t["deadline"]
                         updated += 1
                     break
@@ -734,16 +737,8 @@ async def _handle_mode(update, context, mode: str, text: str):
 
         if text.lower() in ["без даты", "нет", "-"]:
             context.user_data.pop("_mode", None)
-            with file_lock(TASKS_FILE):
-                tasks = get_tasks()
-                for t in tasks:
-                    if str(t["id"]) == str(task_id):
-                        t["deadline"] = None
-                        save_tasks(tasks)
-                        found = True
-                        break
-                else:
-                    found = False
+            from storage import set_task_deadline
+            found = set_task_deadline(task_id, None) is not None
             if found:
                 await update.message.reply_text("✅ *Дедлайн удалён*", parse_mode="Markdown")
                 await show_tasks(update.message, back_filter)
@@ -760,16 +755,8 @@ async def _handle_mode(update, context, mode: str, text: str):
             return
 
         context.user_data.pop("_mode", None)
-        with file_lock(TASKS_FILE):
-            tasks = get_tasks()
-            for t in tasks:
-                if str(t["id"]) == str(task_id):
-                    t["deadline"] = dt.isoformat()
-                    save_tasks(tasks)
-                    found = True
-                    break
-            else:
-                found = False
+        from storage import set_task_deadline
+        found = set_task_deadline(task_id, dt.isoformat()) is not None
         if found:
             await update.message.reply_text(
                 f"✅ *Дедлайн обновлён!*\n\n⏰ {dt.strftime('%d.%m.%Y %H:%M')}",
@@ -841,6 +828,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             await query.message.reply_text(f"Не получилось вернуть: {result['error']}")
+        return
+
+    if data.startswith("rs:"):
+        # Перенос срока задачи (bot/smart_intent._propose_reschedule).
+        from html import escape as _h
+        parts = data.split(":")
+        payload = context.user_data.pop(parts[1], None)
+        await query.edit_message_reply_markup(reply_markup=None)
+        if len(parts) > 2 and parts[2] == "no":
+            return
+        if not payload:
+            await query.message.reply_text("Устарело — напиши ещё раз.")
+            return
+        from storage import set_task_deadline
+        res = set_task_deadline(payload["task_id"], payload["deadline"])
+        if res:
+            new = datetime.datetime.fromisoformat(res["new"])
+            await query.message.reply_text(
+                f"📅 Перенёс «<b>{_h(res['title'])}</b>» на <b>{new.strftime('%d.%m')}</b>. "
+                "Синхронизация с сайтом этот срок больше не перезапишет.", parse_mode="HTML")
+        else:
+            await query.message.reply_text("Задача не найдена.")
         return
 
     if data.startswith("pc:"):

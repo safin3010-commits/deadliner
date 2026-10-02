@@ -882,7 +882,10 @@ async def sync_all_tasks(bot=None, chat_id=None):
             for existing in existing_tasks:
                 if str(existing.get("id")) == str(task_id):
                     found = True
-                    if existing.get("deadline") != t.get("deadline") and t.get("deadline"):
+                    if existing.get("deadline_overridden"):
+                        # Срок перенёс сам пользователь — дату с сайта только запоминаем.
+                        existing["source_deadline"] = t.get("deadline")
+                    elif existing.get("deadline") != t.get("deadline") and t.get("deadline"):
                         existing["deadline"] = t["deadline"]
                         updated += 1
                         print(f"Scheduler: обновлён дедлайн: {t.get('title','')[:40]}")

@@ -102,6 +102,26 @@ def mark_task_done(task_id, manually: bool = False) -> bool:
     return False
 
 
+def set_task_deadline(task_id, deadline_iso: str | None) -> dict | None:
+    """Пользователь сам поменял срок задачи (кнопка «изменить дедлайн» или
+    «перенеси срок» текстом). Ставим флаг deadline_overridden: синхронизация
+    LMS/Нетологии больше не перезаписывает срок своим (раньше перенесённый
+    срок возвращался к дате с сайта при следующей синхронизации), а дату с
+    сайта хранит в source_deadline. Возвращает {"title", "old", "new"}."""
+    with file_lock(TASKS_FILE):
+        tasks = read_json(TASKS_FILE) or []
+        for t in tasks:
+            if str(t.get("id")) == str(task_id):
+                old = t.get("deadline")
+                if t.get("source") in ("lms", "netology") and "source_deadline" not in t:
+                    t["source_deadline"] = old
+                t["deadline"] = deadline_iso
+                t["deadline_overridden"] = True
+                write_json(TASKS_FILE, tasks)
+                return {"title": t.get("title", ""), "old": old, "new": deadline_iso}
+    return None
+
+
 def get_pending_tasks() -> list:
     return [t for t in get_tasks() if not t.get("done") and t.get("source") != "reminder_only"]
 

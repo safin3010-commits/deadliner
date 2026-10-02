@@ -41,7 +41,7 @@ INTENT_PROMPT_TEMPLATE = """Ты — модуль разбора входящи�
 {{
   "items": [
     {{
-      "type": "task | reminder | recurring_reminder | complete | commitment | question | study | none",
+      "type": "task | reminder | recurring_reminder | complete | reschedule | commitment | question | study | none",
       "title": "суть дела, без дат и служебных слов вроде 'напомни'/'сделай'",
       "deadline_iso": "YYYY-MM-DDTHH:MM:SS без часового пояса, или null",
       "reminder_at_iso": "YYYY-MM-DDTHH:MM:SS без часового пояса, или null",
@@ -69,6 +69,8 @@ INTENT_PROMPT_TEMPLATE = """Ты — модуль разбора входящи�
 8. Несколько дел в одном сообщении ("купи молоко и позвони маме завтра") — несколько элементов items, у каждого свой type.
 9. ПРО ПРОДОЛЖЕНИЯ РАЗГОВОРА: если в сообщении не хватает сути (нет названия/темы — например "сделай каждые 3 часа напоминания" без указания о чём), сначала проверь, не продолжение ли это того, что только что обсуждалось в этой же сессии (ты помнишь предыдущие сообщения этого разговора) — если пользователь только что просил напомнить о чём-то конкретном, а этим сообщением уточняет частоту/срок/детали того же самого — возьми title из того предыдущего сообщения, не создавай второй пустой пункт и не спрашивай "что за напоминание". confidence="low" ставь только если ДАЖЕ с учётом истории разговора непонятно, к чему это относится.
 10. ПРО ДАТУ СОБЫТИЯ (только для reminder/recurring_reminder): если напоминание — о событии с собственной датой, которая НЕ совпадает с моментом напоминания ("напомни сегодня вечером, что 2 октября приём у ортодонта" → reminder_at_iso = сегодня вечер, event_date_iso = 2 октября), заполни event_date_iso датой события. Если дата события совпадает с днём напоминания или события как такового нет ("напоминай пить воду") — null. Дату события в title не дублируй.
+4a. type="reschedule" — пользователь просит ПЕРЕНЕСТИ/ИЗМЕНИТЬ срок существующей задачи («перенеси дедлайн финмышления на месяц», «сдвинь тест по БД на пятницу», «поставь лабе срок 20.10»). task_id = id из блока АКТИВНЫЕ ЗАДАЧИ, deadline_iso = НОВЫЙ срок (относительные «на месяц/неделю вперёд» считай от ТЕКУЩЕГО срока задачи; день без часа → 23:59). answer_text пустой. НИКОГДА не создавай вместо этого новую задачу type="task" — это дубль.
+4b. ДЕЙСТВИЯ ВЫПОЛНЯЕТ КОД, НЕ ТЫ. В answer_text никогда не пиши «сделал», «перенёс», «записал», «закрыл», «изменил» — ты ничего не меняешь в данных. Если просьбу нельзя выразить типами выше — type="none" и честно скажи, что так пока не умеешь.
 10a. type="study" — просьба объяснить/разобрать учебную тему или содержание вебинара/лекции ("объясни оконные функции", "что было на вебинаре 8 по БД", "давай продолжим учить ...", "проверь меня по теме ..."). title = тема. answer_text пустой — объяснение готовит отдельный режим по расшифровкам и конспектам.
 10b. Для type="question": если ответа в блоках данных нет или он неполный (например, подробности конкретного вебинара, требования преподавателя, чего нет в поиске) — needs_files=true и answer_text пустой. Если ответ в данных есть — needs_files=false.
 11. type="commitment" — пользователь САМ обещает что-то сделать к сроку, в первом лице и утвердительно: "сделаю лабу в пятницу", "завтра сдам тест", "напишу преподу вечером". title = что сделать (коротко), deadline_iso = к какому сроку (если назван; день без часа → 23:59 того дня), quote = дословная фраза. НЕ commitment: "надо бы", "может, в пятницу", "постараюсь", "подумаю", дедлайн курса ("лабу нужно сдать к пятнице" — это факт, не обещание), просьба напомнить (это reminder). Сомневаешься — confidence="low". Для commitment answer_text оставь ПУСТЫМ: пользователь сам подтвердит запись кнопкой, не пиши «записал». Обещание не заменяет другие пункты: если в том же сообщении есть вопрос — верни оба элемента.
@@ -349,6 +351,11 @@ async def handle_free_text(update, context, text: str) -> None:
                 await _ask_which_to_complete(update, context, title)
             continue
 
+        if itype == "reschedule":
+            # Перенос срока — по кнопке: модель могла выбрать не ту задачу.
+            await _propose_reschedule(update, context, item.get("task_id"), item.get("deadline_iso"))
+            continue
+
         if itype == "commitment":
             # Обещание — только кандидат: в «открытые» попадает лишь после
             # явного «Да» (решение ревью — модель не создаёт фактов сама).
@@ -416,6 +423,31 @@ async def handle_free_text(update, context, text: str) -> None:
         add_dialog_message("assistant", full)
     else:
         await placeholder.delete()
+
+
+async def _propose_reschedule(update, context, task_id, deadline_iso) -> None:
+    import uuid as _uuid
+    from html import escape
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from storage import get_tasks
+    task = next((t for t in get_tasks() if str(t.get("id")) == str(task_id)), None) if task_id else None
+    new = _parse_iso(deadline_iso)
+    if not task or task.get("done") or not new:
+        await update.message.reply_text("🤔 Не понял, у какой задачи и на какую дату перенести срок — уточни, пожалуйста.")
+        return
+    if new.hour == 0 and new.minute == 0:
+        new = new.replace(hour=23, minute=59)
+    token = f"rs_{_uuid.uuid4().hex[:12]}"
+    context.user_data[token] = {"task_id": str(task["id"]), "deadline": new.isoformat()}
+    old = _parse_iso(task.get("deadline"))
+    old_str = old.strftime("%d.%m") if old else "без срока"
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("📅 Перенести", callback_data=f"rs:{token}"),
+        InlineKeyboardButton("✖️ Нет", callback_data=f"rs:{token}:no"),
+    ]])
+    await update.message.reply_text(
+        f"Перенести срок «<b>{escape(task.get('title', ''))}</b>»: {old_str} → <b>{new.strftime('%d.%m')}</b>?",
+        reply_markup=kb, parse_mode="HTML")
 
 
 def _split_message(text: str, limit: int = 3900) -> list[str]:
