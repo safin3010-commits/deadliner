@@ -58,12 +58,27 @@ def _parse_deadline_from_page(html: str) -> datetime.datetime | None:
         if dt:
             return dt
 
-    # Альтернативный формат
-    blocks2 = re.findall(
-        r'</strong>\s*(\w+,\s*\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+\d{4}[^<]{0,20})',
+    # Тест: «Закрывается: …» — это и есть срок. Раньше эта строка не
+    # проверялась отдельно, и запасной разбор ниже хватал ПЕРВУЮ дату на
+    # странице — «Открыто с: 28 сентября» вместо «Закрывается: 20 декабря»
+    # (итоговый тест по финмышлению показывался просроченным, 2026-10-02).
+    blocks_close = re.findall(
+        r'(?:Закрывается|Closes)[^<]{0,5}</strong>\s*([^<]{5,80})',
         html, re.IGNORECASE
     )
-    for block in blocks2:
+    for block in blocks_close:
+        dt = _parse_ru_date(block)
+        if dt:
+            return dt
+
+    # Альтернативный формат — любая подписанная дата, КРОМЕ даты открытия.
+    blocks2 = re.findall(
+        r'<strong>([^<]{0,40})</strong>\s*(\w+,\s*\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+\d{4}[^<]{0,20})',
+        html, re.IGNORECASE
+    )
+    for label, block in blocks2:
+        if re.search(r"откры|open|доступ", label, re.IGNORECASE):
+            continue
         dt = _parse_ru_date(block)
         if dt:
             return dt
@@ -89,6 +104,33 @@ def _parse_deadline_from_page(html: str) -> datetime.datetime | None:
             return dt
 
     return None
+
+
+def _parse_opens_from_page(html: str) -> datetime.datetime | None:
+    """«Открыто с» / «Открывается» — НЕ срок сдачи. Раньше парсер принимал
+    эту дату за дедлайн: задания по дискретке, у которых в LMS срока нет
+    вообще, показывались «просроченными» с 16.09, а ещё не открытые — со
+    «сроком» 14.12 (найдено 2026-10-02). Храним отдельно в opens_at."""
+    for block in re.findall(r'(?:Открыто с|Открывается|Opens|Opened)[^<]{0,5}</strong>\s*([^<]{5,80})',
+                            html, re.IGNORECASE):
+        dt = _parse_ru_date(block)
+        if dt:
+            return dt
+    return None
+
+
+def _page_ok(resp) -> bool:
+    """Страница активности действительно загрузилась (а не ошибка/логин) —
+    только тогда «срока нет» можно считать фактом, а не сбоем сети."""
+    return resp.status_code == 200 and 'region-main' in resp.text
+
+
+def _activity_done(html: str, kind: str) -> bool:
+    """Пройден ли тест / отправлено ли задание — по странице активности
+    (для заданий, которых нет в журнале оценок, например тренировочных тестов)."""
+    if kind == "quiz":
+        return bool(re.search(r'quizattemptsummary|Завершено|Finished', html))
+    return bool(re.search(r'Отправлено для оценивания|Submitted for grading|submissionstatussubmitted', html))
 
 
 def _is_graded(grade_text: str) -> bool:
@@ -212,6 +254,12 @@ async def fetch_lms_deadlines() -> tuple:
             seen_ids = set()
             completed_ids = set()
 
+            # Курсы прошлых семестров (начались больше ~7 месяцев назад) не
+            # трогаем: «в процессе» у Moodle висят и старые курсы без даты
+            # окончания, и их задания засоряли список.
+            recent_from = now.timestamp() - 210 * 86400
+            courses = [c for c in courses if (c.get("startdate") or 0) >= recent_from]
+
             for course in courses:
                 course_id = course.get("id")
                 course_name = course.get("fullname", "LMS")
@@ -260,6 +308,7 @@ async def fetch_lms_deadlines() -> tuple:
                     # Дедлайн и статус со страницы задания
                     r_task = await client.get(link)
                     deadline_dt = _parse_deadline_from_page(r_task.text)
+                    opens_dt = _parse_opens_from_page(r_task.text)
 
                     # Пропускаем если дедлайн прошёл более 10 дней назад
                     if deadline_dt and deadline_dt < now:
@@ -272,11 +321,67 @@ async def fetch_lms_deadlines() -> tuple:
                         "title": task_name,
                         "course_name": course_name[:60],
                         "deadline": deadline_dt.isoformat() if deadline_dt else None,
+                        "opens_at": opens_dt.isoformat() if opens_dt else None,
+                        "deadline_known": _page_ok(r_task),
                         "url": link,
                         "source": "lms",
                         "done": False,
                     })
                     print(f"  + {course_name[:25]} — {task_name[:35]}")
+
+            # Задания и тесты, которых НЕТ в журнале оценок (например,
+            # «Тренировочный тест. Модуль N» — не оцениваются и в журнал не
+            # попадают): раньше парсер их не видел вообще. Смотрим страницу
+            # курса — только для курсов текущего семестра (начались не раньше
+            # ~7 месяцев назад), чтобы не тащить задания прошлых семестров.
+            for course in courses:
+                course_id = course.get("id")
+                course_name = course.get("fullname", "LMS")
+                try:
+                    page = (await client.get(f"{LMS_BASE_URL}/course/view.php?id={course_id}")).text
+                except Exception as e:
+                    print(f"LMS: страница курса {course_id} не загрузилась: {e!r}")
+                    continue
+                sections = [(m.start(), m.group(1).strip()) for m in re.finditer(r'data-sectionname="([^"]+)"', page)]
+                for m_act in re.finditer(
+                        r'href="[^"]*/mod/(assign|quiz)/view\.php\?id=(\d+)"[^>]*>(.*?)</a>', page, re.DOTALL):
+                    kind, mod_id, inner = m_act.groups()
+                    # Раздел курса (тема) — у тренировочных тестов одинаковые
+                    # названия («Тренировочный тест» ×5), без темы синхронизация
+                    # склеила бы их как дубли.
+                    section = next((name for pos, name in reversed(sections) if pos < m_act.start()), "")
+                    task_id = f"lms_{mod_id}"
+                    if task_id in seen_ids or task_id in completed_ids:
+                        continue
+                    name_m = re.search(r'class="instancename"[^>]*>([^<]+)', inner)
+                    task_name = (name_m.group(1) if name_m else re.sub(r"<[^>]+>", " ", inner)).strip()
+                    if not task_name:
+                        continue
+                    if section and len(task_name) < 30 and section.lower() not in task_name.lower():
+                        task_name = f"{task_name} — {section[:50]}"
+                    seen_ids.add(task_id)
+                    link = f"{LMS_BASE_URL}/mod/{kind}/view.php?id={mod_id}"
+                    r_task = await client.get(link)
+                    if _activity_done(r_task.text, kind):
+                        completed_ids.add(task_id)
+                        print(f"  ✓ пройдено (вне журнала): {task_name[:40]}")
+                        continue
+                    deadline_dt = _parse_deadline_from_page(r_task.text)
+                    opens_dt = _parse_opens_from_page(r_task.text)
+                    if deadline_dt and deadline_dt < now and (now - deadline_dt).days > 10:
+                        continue
+                    all_tasks.append({
+                        "id": task_id,
+                        "title": task_name,
+                        "course_name": course_name[:60],
+                        "deadline": deadline_dt.isoformat() if deadline_dt else None,
+                        "opens_at": opens_dt.isoformat() if opens_dt else None,
+                        "deadline_known": _page_ok(r_task),
+                        "url": link,
+                        "source": "lms",
+                        "done": False,
+                    })
+                    print(f"  + (вне журнала) {course_name[:25]} — {task_name[:35]}")
 
             # Сортируем: сначала с дедлайном, потом без
             with_deadline = sorted(

@@ -319,7 +319,9 @@ def _prep_links(model) -> str:
     """Связка «занятие сегодня/завтра ↔ незакрытое задание по той же теме»
     (например вебинар «Оконные функции» → тест к нему до 06.10)."""
     from mentor_dashboard import clean_title
-    tasks = [t for t in _load("tasks.json", []) if not t.get("done") and t.get("source") != "reminder_only"]
+    from mentor_dashboard import is_open
+    tasks = [t for t in _load("tasks.json", []) if not t.get("done") and t.get("source") != "reminder_only"
+             and is_open(t, model["now"])]
     out = []
     for day_key, day_name in (("today", "сегодня"), ("tomorrow", "завтра")):
         for l in model[day_key]["lines"]:
@@ -571,9 +573,11 @@ def _pending_tasks_block() -> str:
     с конкретной записью (type=complete)."""
     from mentor_dashboard import clean_title, short_course
     lines = []
+    from mentor_dashboard import is_open
+    now = datetime.datetime.now(tz=UFA_TZ)
     for t in _load("tasks.json", []):
-        if t.get("done"):
-            continue
+        if t.get("done") or not is_open(t, now):
+            continue   # ещё не открытые в LMS задания — не дело на сейчас
         dl = (t.get("deadline") or "")[:10]
         dl = f" | срок {dl[8:10]}.{dl[5:7]}" if dl else ""
         kind = " | личное напоминание" if t.get("source") == "reminder_only" else ""

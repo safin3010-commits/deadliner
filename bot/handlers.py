@@ -519,10 +519,13 @@ async def sync_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for existing in tasks:
                 if str(existing.get("id")) == str(task_id):
                     found = True
+                    # Дата открытия (не срок!) — для скрытия ещё не открытых заданий.
+                    if "opens_at" in t:
+                        existing["opens_at"] = t.get("opens_at")
                     if existing.get("deadline_overridden"):
                         # Срок перенёс сам пользователь — дату с сайта только запоминаем.
                         existing["source_deadline"] = t.get("deadline")
-                    elif existing.get("deadline") != t.get("deadline") and t.get("deadline"):
+                    elif existing.get("deadline") != t.get("deadline") and (t.get("deadline") or t.get("deadline_known")):
                         existing["deadline"] = t["deadline"]
                         updated += 1
                     break

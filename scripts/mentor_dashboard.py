@@ -40,6 +40,7 @@ COLORS = {
     "overdue": "#ff8a80",
     "reminders": "#a78bfa",
     "quote": "#c9a875",
+    "undated": "#9aa4b2",
 }
 
 # Стандартная сетка пар ТюмГУ — Modeus иногда отдаёт две пары подряд одной
@@ -253,6 +254,45 @@ def build_reminders(tasks: list, reminders: list, now: datetime.datetime) -> lis
     return items
 
 
+_TITLE_DEADLINE_RE = re.compile(r"д[еe]?д?лайн[^\d]{0,4}(\d{1,2})\.(\d{1,2})\.(\d{4})", re.IGNORECASE)
+
+
+def effective_deadline(t: dict):
+    """Срок задачи; если в данных его нет, а в названии написан
+    («Тест по теме 3. (Делайн 11.10.2026)» — Нетология иногда даёт срок
+    только текстом) — берём из названия, конец того дня."""
+    dl = _parse_dt(t.get("deadline"))
+    if dl:
+        return dl
+    m = _TITLE_DEADLINE_RE.search(t.get("title") or "")
+    if m:
+        try:
+            return datetime.datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)), 23, 59, tzinfo=UFA_TZ)
+        except ValueError:
+            return None
+    return None
+
+
+def is_open(t: dict, now: datetime.datetime) -> bool:
+    """Задание уже открыто в LMS. До даты открытия (opens_at) его нельзя
+    сделать — не показываем как дело (было: «срок 14.12», а это дата,
+    когда задание только откроется)."""
+    opens = _parse_dt(t.get("opens_at"))
+    return not opens or opens <= now
+
+
+def build_undated(tasks: list, now: datetime.datetime) -> list:
+    """Открытые задачи без срока — по курсам (тренировочные тесты, задания
+    без дедлайна в LMS). Раньше в окне не было видно их вообще."""
+    out = []
+    for t in tasks:
+        if t.get("done") or t.get("source") == "reminder_only" or effective_deadline(t) or not is_open(t, now):
+            continue
+        out.append(_task_item(t, None))
+    out.sort(key=lambda i: (i["course"], i["title"]))
+    return out
+
+
 def build_deadlines(tasks: list, reminder_items: list, now: datetime.datetime) -> tuple[list, list]:
     """(дедлайны на горизонте, просроченные). Просрочка — только у настоящих
     задач (lms/netology/manual), не у личных напоминаний."""
@@ -260,9 +300,9 @@ def build_deadlines(tasks: list, reminder_items: list, now: datetime.datetime) -
     horizon = today + datetime.timedelta(days=DEADLINE_HORIZON_DAYS)
     upcoming, overdue = [], []
     for t in tasks:
-        if t.get("done") or t.get("source") == "reminder_only":
+        if t.get("done") or t.get("source") == "reminder_only" or not is_open(t, now):
             continue
-        dl = _parse_dt(t.get("deadline"))
+        dl = effective_deadline(t)
         if not dl:
             continue
         if dl < now:
@@ -480,6 +520,7 @@ def build_model(now: datetime.datetime | None = None) -> dict:
         "deadlines": upcoming,
         "overdue": overdue,
         "reminders": reminder_items,
+        "undated": build_undated(tasks, now),
         "quote": quote,
     }
     return model
@@ -660,6 +701,21 @@ def render_html(model: dict) -> str:
         title = f'Просрочено <span class="count">{len(overdue)}</span>'
         blocks.append(_category("overdue", title, visible + more))
 
+    undated = model.get("undated") or []
+    if undated:
+        by_course: dict[str, list] = {}
+        for i in undated:
+            by_course.setdefault(i["course"] or "Без курса", []).append(i)
+        body = "".join(
+            f'<div class="group-title">{_e(course)} · {len(items)}</div>'
+            + "".join(_check_line(dict(i, course=""), "—") for i in items)
+            for course, items in by_course.items()
+        )
+        n = len(undated)
+        blocks.append(_category(
+            "undated", f'Без срока <span class="count">{n}</span>',
+            _spoiler("undated", f"Показать {n} {_plural(n, 'задачу', 'задачи', 'задач')}", body)))
+
     if model["quote"]:
         blocks.append(_category("quote", "Цитата дня", f'<div class="comment-line quote-line">{_e(model["quote"])}</div>'))
 
@@ -774,6 +830,7 @@ PAGE_TEMPLATE = r'''<!DOCTYPE html>
     font-size: 14px; font-style: italic; color: rgba(255,255,255,0.55);
     line-height: 1.45; margin-top: 6px;
   }
+  .group-title { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.5); margin: 8px 0 3px; }
   .note-line { font-size: 13.5px; color: #f4c869; margin-top: 6px; }
   .quote-line { font-size: 15px; color: rgba(255,255,255,0.8); }
 
