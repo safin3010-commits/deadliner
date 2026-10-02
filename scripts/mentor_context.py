@@ -199,8 +199,6 @@ def _today_events(now) -> str:
     out = []
     for r in rows:
         if r["kind"] == "grade":
-            if re.fullmatch(r"оценка 0(\.0+)?", (r["body"] or "").strip()):
-                continue  # 0 в Modeus — «не выставлено», не двойка
             out.append(f"- оценка: {r['title'] or r['course']} — {r['body']}")
         else:
             dl = f", срок {r['effective_at'][8:10]}.{r['effective_at'][5:7]}" if r["effective_at"] else ""
@@ -240,17 +238,25 @@ def _diary(days: int) -> str:
 
 
 def _memory() -> str:
+    """Подтверждённое пользователем — как факты; автоматическая сжатая память
+    (scheduler: ai_memory_profile + последние сообщения) — только как черновик.
+    Автопамять не выбрасываем (без неё теряется связность между неделями), но
+    модель сама её пишет, поэтому она подписана «не проверено» и урезана —
+    чтобы ошибочный вывод не закреплялся как факт (ревью Codex 2026-10-02)."""
     parts = []
     try:
         from agent_db import confirmed_profile
         prof = confirmed_profile()
         if prof:
-            parts.append("Подтверждено им самим:\n" + "\n".join(f"- {p}" for p in prof))
+            parts.append("Подтверждено им самим (факты):\n" + "\n".join(f"- {p}" for p in prof))
     except Exception:
         pass
     try:
         from scheduler import get_ai_memory_recap
-        parts.append(get_ai_memory_recap()[:2500])
+        draft = get_ai_memory_recap()
+        if draft:
+            parts.append("Черновые наблюдения (автосводка прошлых сообщений, НЕ проверено, "
+                         "может быть ошибочно):\n" + draft[:1500])
     except Exception:
         pass
     return "\n\n".join(p for p in parts if p)
@@ -270,10 +276,10 @@ def _knowledge() -> str:
 SLOT_BLOCKS = {
     "morning":        ["today", "new_events", "deadlines", "overdue", "reminders", "commitments", "needs_reply", "diary", "weather", "comms", "knowledge"],
     "midmorning":     ["today", "deadlines", "reminders", "done_today", "activity"],
-    "schedule_focus": ["today", "tomorrow", "vk", "knowledge"],
+    "schedule_focus": ["today", "tomorrow", "vk", "new_events", "needs_reply", "comms", "knowledge"],
     "motivation":     ["deadlines", "overdue", "done_today", "activity"],
     "evening":        ["done_today", "new_events", "tomorrow", "deadlines", "overdue", "commitments", "needs_reply", "activity", "study", "comms"],
-    "winddown":       ["tomorrow", "new_events", "deadlines", "overdue", "reminders", "commitments", "needs_reply", "done_today"],
+    "winddown":       ["done_today", "activity", "tomorrow", "new_events", "deadlines", "overdue", "reminders", "commitments", "needs_reply"],
     "initiative":     ["today", "tomorrow", "new_events", "deadlines", "overdue", "commitments", "needs_reply"],
     "weekly":         ["diary_week", "activity", "commitments_week", "grades_week", "done_today", "overdue", "deadlines", "commitments", "study"],
 }
@@ -335,8 +341,7 @@ def _grades_week(now) -> str:
                             "AND COALESCE(occurred_at, observed_at) >= ? ORDER BY id", (since,)).fetchall()
     finally:
         conn.close()
-    return "\n".join(f"- {r['course'] or ''} {r['title'] or ''}: {r['body']}" for r in rows
-                     if not re.fullmatch(r"оценка 0(\.0+)?", (r["body"] or "").strip()))
+    return "\n".join(f"- {r['course'] or ''} {r['title'] or ''}: {r['body']}" for r in rows)
 
 
 BLOCK_MAX_CHARS = 3500     # один блок сводки

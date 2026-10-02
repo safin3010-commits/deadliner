@@ -3208,20 +3208,25 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
     # Job'ы оставлены закомментированными, чтобы легко вернуть при желании.
     # ──────────────────────────────────────────────────────────────
 
-    # ── Утренний брифинг — включён на 08:30 (2026-09-17): формат подтверждён
-    #    пользователем (погода/пары/дедлайны 3 дня/топ-3 просроченных/цитата) ──
-    scheduler.add_job(send_morning_briefing, trigger="cron", hour=8, minute=30,
-                      args=[bot, chat_id], id="morning_830", misfire_grace_time=3600)
+    # ── Брифинги бота 08:30 / 12:00 / 14:00 / 22:00 ОТКЛЮЧЕНЫ 2026-10-02:
+    #    дублировали сообщения наставника (launchd: 08:30 / 14:00 / 20:33) —
+    #    по два сообщения с одним и тем же подряд. Их содержание перенесено
+    #    в чек-ины (scripts/mentor_checkin.py): утро — погода/пары/дедлайны/
+    #    просрочки; 14:00 — пары + что пришло важного с утра (почта/
+    #    мессенджер/ВК/Нетология, «ждут ответа»); 20:33 — итог дня + завтра.
+    #    Вернуть — раскомментировать. ──
+    # scheduler.add_job(send_morning_briefing, trigger="cron", hour=8, minute=30,
+    #                   args=[bot, chat_id], id="morning_830", misfire_grace_time=3600)
     # scheduler.add_job(send_english_chunk_job, trigger="cron", hour=10, minute=0,
     #                   args=[bot, chat_id], id="english_chunk_1000", misfire_grace_time=3600)
     # ── Разбор дня — включён на 12:00 (2026-09-17): что пришло с утра по почте/
     #    мессенджеру/ВК/Нетологии, не упущено ли важное ──
-    scheduler.add_job(send_noon_review, trigger="cron", hour=12, minute=0,
-                      args=[bot, chat_id], id="noon_1200", misfire_grace_time=3600)
+    # scheduler.add_job(send_noon_review, trigger="cron", hour=12, minute=0,
+    #                   args=[bot, chat_id], id="noon_1200", misfire_grace_time=3600)
     # ── Дневной брифинг — включён на 14:00 (2026-09-17): пары + разбор
     #    просрочек от Claude вместо задачи дня/мотивации от Groq ──
-    scheduler.add_job(send_midday_briefing, trigger="cron", hour=14, minute=0,
-                      args=[bot, chat_id], id="midday_14", misfire_grace_time=3600)
+    # scheduler.add_job(send_midday_briefing, trigger="cron", hour=14, minute=0,
+    #                   args=[bot, chat_id], id="midday_14", misfire_grace_time=3600)
     # scheduler.add_job(send_it_theory_job, trigger="cron", hour=11, minute=0,
     #                   args=[bot, chat_id], id="theory_it_1100", misfire_grace_time=3600)
     # scheduler.add_job(send_it_practice_job, trigger="cron", hour=13, minute=0,
@@ -3235,8 +3240,8 @@ def setup_scheduler(bot, chat_id: int) -> AsyncIOScheduler:
     # ── Вечерний брифинг — включён на 22:00 (2026-09-17): итоги дня + весёлая
     #    мотивация от Claude на завтра + расписание завтра. Граница тихих
     #    часов — send_evening_briefing сам шлёт с ignore_quiet_hours=True ──
-    scheduler.add_job(send_evening_briefing, trigger="cron", hour=22, minute=0,
-                      args=[bot, chat_id], id="evening_22", misfire_grace_time=3600)
+    # scheduler.add_job(send_evening_briefing, trigger="cron", hour=22, minute=0,
+    #                   args=[bot, chat_id], id="evening_22", misfire_grace_time=3600)
     # scheduler.add_job(send_english_dialog_job, trigger="cron", hour=22, minute=0,
     #                   args=[bot, chat_id], id="english_dialog_2200", misfire_grace_time=3600)
     # scheduler.add_job(schedule_random_quote, trigger="cron", hour=9, minute=1,

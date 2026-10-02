@@ -48,8 +48,6 @@ def day_facts(day: datetime.date) -> str:
     for e in events:
         res = json.loads(e["result_json"]) if e["result_json"] else {}
         if e["kind"] == "grade":
-            if re.fullmatch(r"оценка 0(\.0+)?", (e["body"] or "").strip()):
-                continue  # 0 в Modeus — «не выставлено», не двойка
             lines.append(f"оценка: {e['course'] or ''} {e['title'] or ''} — {e['body']}")
         elif e["kind"] == "task_new":
             lines.append(f"новое задание: {e['title']} ({e['course'] or ''})")

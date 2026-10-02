@@ -72,8 +72,9 @@ def collect(now) -> list[dict]:
             value = str(meta.get("value", "")).strip()
             try:
                 num = float(value.replace(",", "."))
-                # 0 в Modeus — обычно «не выставлено», не двойка. Низкая — 1..3 по пятибалльной.
-                low = 1 <= num <= 3
+                # 0 в Modeus — реальный ноль (подтвердил пользователь 2026-10-02).
+                # Низкая — 0..3 по пятибалльной.
+                low = 0 <= num <= 3
             except ValueError:
                 low = False
             what = e["title"] or e["course"] or "работа"
