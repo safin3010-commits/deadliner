@@ -77,14 +77,14 @@ def record_sent(slot: str, text: str, feedback_id: str = ""):
 
 def _sent_block(now: datetime.datetime) -> str:
     sent = _load("mentor_sent.json", [])
-    since = now - datetime.timedelta(hours=30)
+    since = now - datetime.timedelta(hours=72)
     lines = []
     for s in sent:
         at = _parse_any_dt(s.get("at"))
         if at and at >= since:
             plain = re.sub(r"</?[bi]>", "", s.get("text", ""))
-            lines.append(f"- {at.strftime('%d.%m %H:%M')} ({s.get('slot')}): {_clip(plain, 500)}")
-    return "\n".join(lines[-4:])
+            lines.append(f"- {at.strftime('%d.%m %H:%M')} ({s.get('slot')}): {_clip(plain, 350)}")
+    return "\n".join(lines[-6:])
 
 
 # ─── блоки данных ────────────────────────────────────────────────────
@@ -237,6 +237,137 @@ def _diary(days: int) -> str:
         return ""
 
 
+# ─── «реально полезное» из источников (добавлено 2026-10-02) ─────────
+# Раньше наставник видел только списки дедлайнов — и если их не было,
+# писал «срочного нет, можно отдохнуть». При этом в источниках лежало
+# полезное, которое до него не доходило: домашка из чатов, выложенные
+# записи вебинаров, проваленная посещаемость, связка «вебинар → тест».
+
+def _chat_homework(now) -> str:
+    """Домашка и объявления из чатов (мессенджер вуза, ВК) за 2 дня:
+    сообщения одного отправителя склеены, голые «18:02» выброшены,
+    оставлено только то, где есть учебные слова."""
+    try:
+        from agent_extract import STUDY_WORDS
+    except Exception:
+        STUDY_WORDS = re.compile(r"дз|домашн|hw|задани|сдать|срок|дедлайн|тест|проект", re.I)
+    since = now - datetime.timedelta(hours=48)
+    msgs = [m for m in _load("messenger_recent.json", []) if (_parse_any_dt(m.get("at")) or since) >= since]
+    merged = []
+    for m in msgs:
+        text = (m.get("text") or "").strip()
+        if not text or re.fullmatch(r"[\d:\s]+", text):
+            continue
+        if merged and merged[-1][0] == m.get("sender"):
+            merged[-1][1].append(text)
+        else:
+            merged.append([m.get("sender") or "", [text]])
+    out = []
+    for sender, texts in merged:
+        body = " / ".join(texts)
+        if STUDY_WORDS.search(body):
+            out.append(f"- {_clip(sender, 45)}: {_clip(body, 400)}")
+    return "\n".join(out[-10:])
+
+
+def _recordings(now) -> str:
+    """Письма «Запись загружена» — можно пересмотреть пропущенное."""
+    since = now - datetime.timedelta(hours=72)
+    out = []
+    for m in _load("mail_recent.json", []):
+        at = _parse_any_dt(m.get("date"))
+        subj = m.get("subject") or ""
+        if at and at >= since and re.search(r"запись загружена|запись занятия|запись вебинара", subj, re.I):
+            out.append(f"- {at.strftime('%d.%m')}: {_clip(subj, 180)}")
+    return "\n".join(out)
+
+
+def _risks() -> str:
+    """Риски по предметам из анализа Modeus: прогноз ниже зачёта (61),
+    посещаемость ниже 50 %. Считает код, модель только объясняет."""
+    text = _read_text("study_analysis_latest.txt")
+    if not text:
+        return ""
+    out = []
+    for block in re.split(r"\n---\s*", text)[1:]:
+        name = block.split(" ---", 1)[0].strip()
+        cur = re.search(r"Текущий балл:\s*([\d.]+)", block)
+        fc = re.search(r"Прогноз[^~]*~([\d.]+)", block)
+        att = re.search(r"П\s*(\d+)%\s*/\s*Н\s*(\d+)%", block)
+        need = re.search(r"До 3:\s*\+([\d.]+)", block)
+        flags = []
+        if fc and float(fc.group(1)) < 61:
+            flags.append(f"прогноз ~{fc.group(1)}/100 — ниже зачёта")
+        if att and int(att.group(1)) < 50:
+            flags.append(f"посещаемость {att.group(1)}%, пропуски {att.group(2)}%")
+        if flags:
+            extra = f"; до тройки не хватает {need.group(1)}" if need else ""
+            out.append(f"- {name}: балл {cur.group(1) if cur else '?'}; " + "; ".join(flags) + extra)
+    return "\n".join(out)
+
+
+def _prep_links(model) -> str:
+    """Связка «занятие сегодня/завтра ↔ незакрытое задание по той же теме»
+    (например вебинар «Оконные функции» → тест к нему до 06.10)."""
+    from mentor_dashboard import clean_title
+    tasks = [t for t in _load("tasks.json", []) if not t.get("done") and t.get("source") != "reminder_only"]
+    out = []
+    for day_key, day_name in (("today", "сегодня"), ("tomorrow", "завтра")):
+        for l in model[day_key]["lines"]:
+            topic = l["label"].split(":", 1)[-1].lower()
+            words = {w for w in re.findall(r"[а-яёa-z]{5,}", topic)} - {"вебинар", "занятие", "задачи"}
+            for t in tasks:
+                title = (t.get("title") or "").lower()
+                if words and sum(w[:6] in title for w in words) >= max(1, min(2, len(words))):
+                    dl = (t.get("deadline") or "")[:10]
+                    dl = f", срок {dl[8:10]}.{dl[5:7]}" if dl else ""
+                    out.append(f"- {day_name} {l['time']} {_clip(l['label'], 70)} → «{_clip(clean_title(t.get('title', '')), 70)}»{dl}")
+    return "\n".join(dict.fromkeys(out))
+
+
+def _sources_health() -> str:
+    """Какие источники сейчас не работают — чтобы наставник не говорил
+    «в ВК ничего нет», когда ВК просто не читается."""
+    out = []
+    try:
+        st = os.stat(os.path.join(DATA_DIR, "vk_expired_alert.json"))
+        if datetime.datetime.now().timestamp() - st.st_mtime < 3 * 86400:
+            out.append("- ВК: вход истёк, объявления группы НЕ читаются (нужно перелогиниться)")
+    except OSError:
+        pass
+    return "\n".join(out)
+
+
+def _feedback() -> str:
+    """Его оценки прошлых сообщений (👍/👎) — модель не обучается сама,
+    поэтому «обучение» — это показать ей, что понравилось и что нет."""
+    fb = {}
+    try:
+        with open(os.path.join(DATA_DIR, "mentor_feedback.jsonl"), encoding="utf-8") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                    fb[r.get("feedback_id")] = r.get("rating")
+                except json.JSONDecodeError:
+                    continue
+    except FileNotFoundError:
+        return ""
+    good, bad = [], []
+    for s_ in _load("mentor_sent.json", []):
+        rating = fb.get(s_.get("feedback_id"))
+        plain = _clip(re.sub(r"</?[bi]>", "", s_.get("text", "")), 260)
+        if rating == "down":
+            bad.append(plain)
+        elif rating == "up":
+            good.append(plain)
+    parts = []
+    if bad:
+        parts.append("👎 НЕ понравились (не пиши так):\n" + "\n".join(f"- {b}" for b in bad[-3:]))
+    if good:
+        parts.append("👍 Понравились (такой полезности и держись):\n" + "\n".join(f"- {g}" for g in good[-2:]))
+    return "\n".join(parts)
+
+
 def _memory() -> str:
     """Подтверждённое пользователем — как факты; автоматическая сжатая память
     (scheduler: ai_memory_profile + последние сообщения) — только как черновик.
@@ -274,14 +405,14 @@ def _knowledge() -> str:
 
 # Какие блоки нужны какому слоту — модель получает только релевантное.
 SLOT_BLOCKS = {
-    "morning":        ["today", "new_events", "deadlines", "overdue", "reminders", "commitments", "needs_reply", "diary", "weather", "comms", "knowledge"],
+    "morning":        ["health", "today", "prep", "chat_homework", "new_events", "recordings", "risks", "deadlines", "overdue", "reminders", "commitments", "needs_reply", "diary", "weather", "knowledge", "feedback"],
     "midmorning":     ["today", "deadlines", "reminders", "done_today", "activity"],
-    "schedule_focus": ["today", "tomorrow", "vk", "new_events", "needs_reply", "comms", "knowledge"],
+    "schedule_focus": ["health", "today", "tomorrow", "prep", "vk", "chat_homework", "new_events", "recordings", "needs_reply", "comms", "knowledge", "feedback"],
     "motivation":     ["deadlines", "overdue", "done_today", "activity"],
     "evening":        ["done_today", "new_events", "tomorrow", "deadlines", "overdue", "commitments", "needs_reply", "activity", "study", "comms"],
-    "winddown":       ["done_today", "activity", "tomorrow", "new_events", "deadlines", "overdue", "reminders", "commitments", "needs_reply"],
-    "initiative":     ["today", "tomorrow", "new_events", "deadlines", "overdue", "commitments", "needs_reply"],
-    "weekly":         ["diary_week", "activity", "commitments_week", "grades_week", "done_today", "overdue", "deadlines", "commitments", "study"],
+    "winddown":       ["done_today", "activity", "tomorrow", "prep", "chat_homework", "risks", "new_events", "deadlines", "overdue", "reminders", "commitments", "needs_reply", "feedback"],
+    "initiative":     ["today", "tomorrow", "prep", "new_events", "deadlines", "overdue", "commitments", "needs_reply"],
+    "weekly":         ["risks", "feedback", "diary_week", "activity", "commitments_week", "grades_week", "done_today", "overdue", "deadlines", "commitments", "study"],
 }
 
 TITLES = {
@@ -298,6 +429,12 @@ TITLES = {
     "vk": "ВК: ИЗМЕНЕНИЯ РАСПИСАНИЯ",
     "knowledge": "ОРГФАКТЫ С ВЕБИНАРОВ ПО СЕГОДНЯШНИМ ПРЕДМЕТАМ",
     "commitments": "ЕГО ОБЕЩАНИЯ (сам подтвердил; если срок прошёл — мягко спроси, как дела)",
+    "chat_homework": "ДОМАШКА И ОБЪЯВЛЕНИЯ ИЗ ЧАТОВ ЗА 2 ДНЯ (сообщения других людей; задания — для него)",
+    "recordings": "ВЫЛОЖЕНЫ ЗАПИСИ ВЕБИНАРОВ (можно пересмотреть)",
+    "risks": "РИСКИ ПО ПРЕДМЕТАМ (код по данным Modeus: прогноз ниже зачёта / посещаемость < 50 %)",
+    "prep": "СВЯЗКИ: ЗАНЯТИЕ ↔ НЕЗАКРЫТОЕ ЗАДАНИЕ ПО ТОЙ ЖЕ ТЕМЕ",
+    "health": "ИСТОЧНИКИ, КОТОРЫЕ СЕЙЧАС НЕ РАБОТАЮТ",
+    "feedback": "ЕГО ОЦЕНКИ ТВОИХ ПРОШЛЫХ СООБЩЕНИЙ",
     "new_events": "НОВОЕ ЗА СУТКИ: ОЦЕНКИ И ЗАДАНИЯ",
     "needs_reply": "ЖДУТ ЕГО ОТВЕТА (письма/сообщения преподавателей и т.п.)",
     "diary": "ДНЕВНИК ПОСЛЕДНИХ ДНЕЙ (сжатые итоги)",
@@ -386,6 +523,12 @@ def build_checkin_pack(slot: str, extra_blocks: list[str] | None = None) -> str:
         "vk": _vk_schedule,
         "knowledge": _knowledge,
         "commitments": lambda: _commitments_block(),
+        "chat_homework": lambda: _chat_homework(now),
+        "recordings": lambda: _recordings(now),
+        "risks": _risks,
+        "prep": lambda: _prep_links(model),
+        "health": _sources_health,
+        "feedback": _feedback,
         "new_events": lambda: _today_events(now),
         "needs_reply": lambda: _needs_reply(now),
         "diary": lambda: _diary(3),

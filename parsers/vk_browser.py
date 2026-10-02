@@ -16,6 +16,29 @@ VK_COOKIES_FILE = "data/vk_cookies.json"
 # CHROME_PATH берётся из config
 
 
+_EXPIRED_ALERT_FILE = "data/vk_expired_alert.json"
+
+
+def _expired_alert_due() -> bool:
+    """Предупреждение о протухшем входе — не чаще раза в сутки (проверка идёт
+    каждые 15 минут по каждой беседе — иначе 100+ одинаковых сообщений в день)."""
+    import datetime
+    now = datetime.datetime.now().timestamp()
+    try:
+        with open(_EXPIRED_ALERT_FILE) as f:
+            last = json.load(f).get("at", 0)
+    except Exception:
+        last = 0
+    if now - last < 24 * 3600:
+        return False
+    try:
+        with open(_EXPIRED_ALERT_FILE, "w") as f:
+            json.dump({"at": now}, f)
+    except Exception:
+        pass
+    return True
+
+
 def _load_seen() -> dict:
     try:
         with open(VK_SEEN_FILE) as f:
@@ -173,9 +196,21 @@ async def fetch_todays_vk_messages(chat_url: str = None, chat_label: str = "") -
                 page_title = await page.title()
             except Exception:
                 page_title = ""
-            if "login" in page.url or page_title.strip() == "VK | Welcome!":
-                print("VK: куки протухли")
+            # Протухшая сессия: ВК отдаёт страницу приглашения войти. Раньше
+            # проверялся только английский заголовок «VK | Welcome!», а русский
+            # «ВКонтакте | Добро пожаловать» пропускался — парсер три недели
+            # молча писал «сегодняшних сообщений не найдено» (найдено
+            # 2026-10-02). Плюс страховка: на странице нет ни истории беседы,
+            # ни сообщений — тоже считаем, что вход слетел.
+            history_count = await page.evaluate(
+                "() => document.querySelectorAll('[class*=\"ConvoHistory\"], [class*=\"ConvoMessage\"]').length"
+            )
+            welcome = any(w in page_title for w in ("Welcome", "Добро пожаловать"))
+            if "login" in page.url or welcome or history_count == 0:
+                print(f"VK: куки протухли (заголовок «{page_title}», элементов беседы: {history_count})")
                 await browser.close()
+                if not _expired_alert_due():
+                    return []
                 try:
                     from config import TELEGRAM_TOKEN, MY_TELEGRAM_ID
                     import httpx as _httpx
