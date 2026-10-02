@@ -282,6 +282,13 @@ def _recordings(now) -> str:
     return "\n".join(out)
 
 
+# Предметы, которые в этом семестре ведёт только Нетология: в Modeus они
+# висят с 0 баллов, но это не риск. Объявление группы в ВК 30.09.2026:
+# «…пары по Базам данных и Управлению проектом… в текущем семестре только
+# на стороне Нетологии».
+MODEUS_RISK_EXCLUDE = ("Базы данных", "Управление проект")
+
+
 def _risks() -> str:
     """Риски по предметам из анализа Modeus: прогноз ниже зачёта (61),
     посещаемость ниже 50 %. Считает код, модель только объясняет."""
@@ -291,6 +298,8 @@ def _risks() -> str:
     out = []
     for block in re.split(r"\n---\s*", text)[1:]:
         name = block.split(" ---", 1)[0].strip()
+        if any(name.startswith(x) for x in MODEUS_RISK_EXCLUDE):
+            continue
         cur = re.search(r"Текущий балл:\s*([\d.]+)", block)
         fc = re.search(r"Прогноз[^~]*~([\d.]+)", block)
         att = re.search(r"П\s*(\d+)%\s*/\s*Н\s*(\d+)%", block)

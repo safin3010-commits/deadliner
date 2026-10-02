@@ -32,6 +32,12 @@ def log(msg: str):
 def main():
     refresh_yac_schedule()
     try:
+        from parsers.yandex_group_calendar import refresh as refresh_group_calendar
+        n = refresh_group_calendar()
+        log(f"календарь группы: {n} событий")
+    except Exception as e:
+        log(f"календарь группы: ошибка {e!r}")
+    try:
         from mentor_dashboard import render_feed
         if render_feed():
             log("окно на столе пересобрано (новые ссылки/данные)")

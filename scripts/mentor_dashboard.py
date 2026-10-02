@@ -296,22 +296,55 @@ def build_deadlines(tasks: list, reminder_items: list, now: datetime.datetime) -
 
 # ─── расписание ──────────────────────────────────────────────────────
 
+def _group_calendar_events(day: datetime.date) -> list[dict]:
+    """События своих групп из Яндекс Календаря группы на день
+    (parsers/yandex_group_calendar.py, обновляется каждые 30 минут)."""
+    data = _load("group_calendar.json", {})
+    try:
+        if (_now() - _parse_dt(data.get("fetched_at"))).total_seconds() > 36 * 3600:
+            return []
+    except Exception:
+        return []
+    iso = day.isoformat()
+    return [e for e in data.get("events", []) if (e.get("start") or "").startswith(iso)]
+
+
+def _group_calendar_links(day: datetime.date) -> dict:
+    """HH:MM (местное) → ссылка. Одно событие часто покрывает две пары подряд,
+    время второй указано в описании по Москве («17:20 - 18:50, 19:00 - 20:30
+    (мск)») — переводим в местное время и вешаем ссылку на оба начала."""
+    links = {}
+    msk = datetime.timezone(datetime.timedelta(hours=3))
+    for e in _group_calendar_events(day):
+        if not e.get("links"):
+            continue
+        link = e["links"][0]
+        start = _parse_dt(e["start"])
+        if start:
+            links.setdefault(start.strftime("%H:%M"), link)
+        if "мск" in (e.get("note") or "").lower():
+            for hh, mm in re.findall(r"(\d{1,2}):(\d{2})\s*-\s*\d{1,2}:\d{2}", e["note"]):
+                t = datetime.datetime.combine(day, datetime.time(int(hh), int(mm)), tzinfo=msk).astimezone(UFA_TZ)
+                links.setdefault(t.strftime("%H:%M"), link)
+    return links
+
+
 def _yac_links(day: datetime.date) -> dict:
-    """HH:MM → ссылка на вебинар на этот день из data/yac_schedule.json
-    (обновляется каждые 30 минут scripts/refresh_yac_links.py)."""
+    """HH:MM → ссылка на занятие. Сначала официальный Яндекс Календарь группы
+    (с 15.09 ссылки публикуют только там), затем yetanothercalendar."""
+    links = _group_calendar_links(day)
     data = _load("yac_schedule.json", {})
     try:
         age_h = (_now() - _parse_dt(data.get("fetched_at"))).total_seconds() / 3600
         if age_h > 12:
-            return {}
+            return links
     except Exception:
-        return {}
+        return links
     iso = day.isoformat()
-    links = {}
     for ev in data.get("modeus_events", []):
         start = ev.get("start") or ""
         if start.startswith(iso) and ev.get("mts_link"):
-            links[start[11:16]] = ev["mts_link"]
+            links.setdefault(start[11:16], ev["mts_link"])
     for ev in data.get("netology_webinars", []):
         starts_at = ev.get("starts_at") or ""
         if starts_at.startswith(iso) and ev.get("webinar_url"):
@@ -373,6 +406,19 @@ def build_schedule(day: datetime.date) -> dict:
                     hhmm = s_.strftime("%H:%M")
                     url = links.get(hhmm) or (loc if src == "netology" and loc.startswith("http") else "")
                     lines.append({"time": hhmm, "label": label, "url": url, "start": s_, "end": e_})
+
+    # Календарь группы — тоже только дополнение: занятие, которого нет ни в
+    # Modeus, ни в Нетологии (например, только что добавленное), с пометкой.
+    have_times = {l["time"] for l in lines if l["start"]}
+    for e in _group_calendar_events(day):
+        start = _parse_dt(e.get("start"))
+        if not start or e.get("all_day") or start.strftime("%H:%M") in have_times:
+            continue
+        if (e.get("name") or "").lower().startswith("асинхрон"):
+            continue
+        lines.append({"time": start.strftime("%H:%M"), "label": f"{e['name'][:90]} (календарь группы)",
+                      "url": (e.get("links") or [""])[0], "start": start,
+                      "end": _parse_dt(e.get("end")) or start + datetime.timedelta(minutes=90)})
 
     # Сводка из беседы ВК — ТОЛЬКО дополнение: её разбирает модель, и раньше
     # она целиком заменяла официальное расписание (одна ошибка модели меняла

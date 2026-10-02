@@ -9,6 +9,7 @@ build_syllabus_organization.py). Пустое значение = фильтр в
   STUDY_ENGLISH_TEACHER=Фамилия        # чьи записи английского брать
   STUDY_DISCRETE_GROUP=ЛБ99            # группа практик дискретной математики (пример)
   STUDY_READING_GROUP=П-99             # группа аналитического чтения (пример)
+  STUDY_GROUPS=ЛБ-99,П-99,П-98         # все свои группы через запятую (календарь группы)
 """
 import os
 import re
@@ -22,6 +23,15 @@ FULL_NAME = os.getenv("STUDY_FULL_NAME", "").strip()
 ENGLISH_TEACHER = os.getenv("STUDY_ENGLISH_TEACHER", "").strip()
 DISCRETE_GROUP = os.getenv("STUDY_DISCRETE_GROUP", "").strip()
 READING_GROUP = os.getenv("STUDY_READING_GROUP", "").strip()
+
+
+def study_groups() -> list[str]:
+    """Все свои группы: STUDY_GROUPS + группы дискретки и чтения."""
+    groups = [g.strip() for g in os.getenv("STUDY_GROUPS", "").split(",") if g.strip()]
+    for g in (DISCRETE_GROUP, READING_GROUP):
+        if g and g not in groups:
+            groups.append(g)
+    return groups
 
 
 def person_re() -> re.Pattern:

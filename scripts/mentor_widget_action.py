@@ -103,6 +103,12 @@ def cmd_refresh() -> dict:
         except Exception as e:
             problems.append("ссылки")
             log(f"refresh: yac: {e!r}")
+        try:
+            from parsers.yandex_group_calendar import refresh as refresh_group_calendar
+            refresh_group_calendar()
+        except Exception as e:
+            problems.append("календарь группы")
+            log(f"refresh: календарь группы: {e!r}")
 
         cmd_render()
 
