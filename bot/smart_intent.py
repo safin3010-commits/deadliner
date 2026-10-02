@@ -6,12 +6,13 @@
 Клод) → часто ещё одно уточнение кнопкой → отдельный мастер параметров
 повтора (bot/reminder_wizard.py). См. обсуждение в сессии 2026-09-28.
 
-Использует общую внутридневную сессию (claude_session.py) — тот же файл
-data/claude_session.json, что и у наставника/сводок, так что бот реально
-помнит контекст разговора в течение дня, а не начинает с нуля каждый раз.
-Клоду даётся только чтение (Read/Glob/Grep) — записывает в tasks.json/
-reminders.json всегда код здесь, а не сам Клод, это сознательная граница
-безопасности (см. обсуждение с пользователем).
+С 2026-10-02 — разовый вызов без дневной сессии и без инструментов: контекст
+собирает код (scripts/mentor_context.build_chat_pack: задачи, расписание,
+поиск по переписке и оргфактам), память разговора — data/agent.db
+(dialog_messages). Записывает в tasks.json/reminders.json всегда код здесь,
+а не Клод — сознательная граница безопасности. Явные просьбы пользователя
+(«напомни», «добавь задачу») выполняются сразу; то, что модель заметила сама
+(обещания), — только по кнопке подтверждения.
 """
 from __future__ import annotations
 
@@ -215,11 +216,13 @@ def create_one_off_reminder(title: str, reminder_at_iso: str | None, event_date_
 def create_recurring_reminder(title: str, interval_minutes, times_raw, start_at_iso: str | None, event_date_iso: str | None = None) -> tuple[dict, dict]:
     from reminders import add_reminder
     now = datetime.datetime.now(tz=UFA_TZ)
-    start_dt = _parse_iso(start_at_iso) or now
     try:
         interval = max(MIN_INTERVAL_MINUTES, int(interval_minutes))
     except (TypeError, ValueError):
         interval = 60
+    # Без явного старта первое срабатывание — через интервал (так и обещает
+    # промпт), а не сразу (ревью Codex: «каждые 3 часа» звонило через 0 с).
+    start_dt = _parse_iso(start_at_iso) or (now + datetime.timedelta(minutes=interval))
     times = _clamp_times(times_raw)
     task = add_task(title, start_dt.isoformat(), "reminder_only", event_date=_event_date(event_date_iso))
     reminder = add_reminder(str(task["id"]), title, interval, times, start_at=start_dt.isoformat())
@@ -404,7 +407,8 @@ async def handle_free_text(update, context, text: str) -> None:
         if deep_question:
             import time as _time
             from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-            token = f"dq_{int(_time.time() * 1000) & 0xFFFFFF}"
+            import uuid as _uuid
+            token = f"dq_{_uuid.uuid4().hex[:12]}"
             context.user_data[token] = deep_question
             markup = InlineKeyboardMarkup([[InlineKeyboardButton(
                 "🔎 Подробнее в материалах", callback_data=f"deep:{token}")]])
@@ -493,7 +497,8 @@ async def _ask_clarification(update, context, item: dict, original_text: str) ->
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from bot.messages import _esc_md
 
-    token = f"si_{int(_time.time() * 1000) & 0xFFFFFF}"
+    import uuid as _uuid
+    token = f"si_{_uuid.uuid4().hex[:12]}"
     context.user_data[token] = {"item": item, "text": original_text}
     title = item.get("title") or original_text[:60]
     kb = InlineKeyboardMarkup([[

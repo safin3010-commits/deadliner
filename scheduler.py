@@ -54,8 +54,8 @@ async def _ask_claude_cli(prompt: str, timeout: int = 60, model: str = "claude-h
         # вызов не получает файлового контекста и полагается только на
         # текст prompt (обычно "{USER_NAME}а/у" грамматически склеенное).
         # Обнаружено 2026-09-20: вечернее ИИ-сообщение вдруг стало
-        # обращаться "Илья" вместо "Ильнур" (реальный студент, не тот, кто
-        # использует бота) — и раз попав в data/ai_memory_log.json,
+        # обращаться к студенту чужим именем (другого человека из переписки)
+        # — и раз попав в data/ai_memory_log.json,
         # самозакреплялось в каждом следующем вызове через get_ai_memory_recap().
         f"Студента, для которого ты сейчас пишешь короткое сообщение, зовут "
         f"{USER_NAME} — используй только это имя, даже если в тексте промпта "
@@ -448,9 +448,8 @@ def _load_pending_notifications() -> list:
 
 
 def _save_pending_notifications(notifications: list):
-    os.makedirs("data", exist_ok=True)
-    with open(PENDING_NOTIFICATIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(notifications, f, ensure_ascii=False, indent=2)
+    # Атомарно (temp + replace): обрыв посреди записи не обнулит очередь.
+    atomic_write_json(PENDING_NOTIFICATIONS_FILE, notifications)
 
 
 def _add_pending_notification(chat_id: int, text: str, parse_mode: str = "Markdown"):
@@ -549,25 +548,38 @@ async def retry_pending_notifications(bot):
     now_h = datetime.datetime.now(tz=UFA_TZ).hour
     if _in_quiet_hours(now_h):
         return
-    # file_lock на весь цикл (включая await bot.send_message) — та же причина,
-    # что и в _add_pending_notification: без него параллельная постановка
-    # нового уведомления в очередь во время этого прогона read-modify-write
-    # могла бы затереться финальной записью still_pending.
+    # Лок НЕ держим во время await bot.send_message: file_lock — синхронный
+    # flock, и если пока мы ждём сеть, другая джоба зайдёт в
+    # _add_pending_notification, она заблокирует ВЕСЬ event loop на том же
+    # локе — и наш await уже никогда не продолжится (ревью Codex 2026-10-02).
+    # Поэтому: под локом забрали снимок → отправили без лока → под локом
+    # убрали из очереди только реально доставленное (новые записи сохраняются).
     with file_lock(PENDING_NOTIFICATIONS_FILE):
         pending = _load_pending_notifications()
-        if not pending:
-            return
-        print(f"Scheduler: retry {len(pending)} уведомлений...")
-        still_pending = []
-        for n in pending:
-            try:
-                await bot.send_message(chat_id=n["chat_id"], text=n["text"], parse_mode=n.get("parse_mode", "Markdown"))
-            except Exception as e:
-                n["attempts"] = n.get("attempts", 0) + 1
-                if n["attempts"] % 50 == 0:
-                    print(f"Scheduler: уведомление всё ещё не доставлено после {n['attempts']} попыток: {e!r}")
-                still_pending.append(n)
-        _save_pending_notifications(still_pending)
+    if not pending:
+        return
+    print(f"Scheduler: retry {len(pending)} уведомлений...")
+    delivered, failed = set(), {}
+    for n in pending:
+        key = (n.get("chat_id"), n.get("text"))
+        try:
+            await bot.send_message(chat_id=n["chat_id"], text=n["text"], parse_mode=n.get("parse_mode", "Markdown"))
+            delivered.add(key)
+        except Exception as e:
+            failed[key] = n.get("attempts", 0) + 1
+            if failed[key] % 50 == 0:
+                print(f"Scheduler: уведомление всё ещё не доставлено после {failed[key]} попыток: {e!r}")
+    with file_lock(PENDING_NOTIFICATIONS_FILE):
+        current = _load_pending_notifications()
+        remaining = []
+        for n in current:
+            key = (n.get("chat_id"), n.get("text"))
+            if key in delivered:
+                continue
+            if key in failed:
+                n["attempts"] = failed[key]
+            remaining.append(n)
+        _save_pending_notifications(remaining)
 
 
 # ─── Синхронизация расписания ─────────────────────────────────────────

@@ -190,10 +190,22 @@ def connect() -> sqlite3.Connection:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version < SCHEMA_VERSION:
         if version >= 1:
-            # Бэкап перед миграцией (решение ревью).
-            import shutil
+            # Бэкап перед миграцией. Через sqlite backup API, а не copy2:
+            # в режиме WAL свежие данные лежат в -wal, и копия одного файла
+            # получалась неполной (ревью Codex 2026-10-02). Без проверенного
+            # бэкапа миграцию не делаем.
+            backup_path = f"{DB_PATH}.v{version}.bak"
+            dst = sqlite3.connect(backup_path)
             try:
-                shutil.copy2(DB_PATH, f"{DB_PATH}.v{version}.bak")
+                conn.backup(dst)
+                ok = dst.execute("PRAGMA user_version").fetchone()[0] == version
+            finally:
+                dst.close()
+            if not ok:
+                conn.close()
+                raise RuntimeError(f"agent_db: бэкап перед миграцией не прошёл проверку ({backup_path})")
+            try:
+                os.chmod(backup_path, 0o600)
             except OSError:
                 pass
         with conn:

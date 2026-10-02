@@ -751,9 +751,11 @@ def main():
     missed = load_missed()
     missed_needs_vk = any(m.get("slot") == "schedule_focus" for m in missed)
 
-    if cfg["need_study_analysis"]:
+    # --dry-run: ничего не обновляем и не отправляем — только собираем
+    # сводку и показываем ответ модели (один вызов Claude всё же будет).
+    if cfg["need_study_analysis"] and not DRY_RUN:
         refresh_study_analysis()
-    if cfg["need_weather"]:
+    if cfg["need_weather"] and not DRY_RUN:
         refresh_weather()
     consumed_vk_entries = []
     if (cfg["need_vk_schedule"] or missed_needs_vk) and not DRY_RUN:

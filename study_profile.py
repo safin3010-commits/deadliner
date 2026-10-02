@@ -7,8 +7,8 @@ build_syllabus_organization.py). Пустое значение = фильтр в
 .env:
   STUDY_FULL_NAME=Имя Фамилия          # упоминания тебя в субтитрах/силлабусах
   STUDY_ENGLISH_TEACHER=Фамилия        # чьи записи английского брать
-  STUDY_DISCRETE_GROUP=ЛБ18            # группа практик дискретной математики
-  STUDY_READING_GROUP=П-06             # группа аналитического чтения
+  STUDY_DISCRETE_GROUP=ЛБ99            # группа практик дискретной математики (пример)
+  STUDY_READING_GROUP=П-99             # группа аналитического чтения (пример)
 """
 import os
 import re
@@ -34,7 +34,7 @@ def person_re() -> re.Pattern:
 
 
 def group_re(group: str) -> re.Pattern | None:
-    """«ЛБ18» → ЛБ-18 / ЛБ 18 / ЛБ18; «П-06» → П-06 / П6 и т.п."""
+    """«ЛБ99» → ЛБ-99 / ЛБ 99 / ЛБ99; «П-09» → П-09 / П9 и т.п."""
     m = re.match(r"^\s*([^\d\s-]+)[\s-]*0*(\d+)\s*$", group or "")
     if not m:
         return None

@@ -25,7 +25,7 @@ os.chdir(PROJECT_DIR)
 
 from config import UFA_TZ
 
-VERSION = "x2"
+VERSION = "x3"
 BATCH = 25
 MAX_PROPOSALS_PER_RUN = 3
 LOOKBACK_DAYS = 7
@@ -37,7 +37,11 @@ NOISE_SUBJECTS = re.compile(r"запись загружена|через \d+ м�
 STUDY_WORDS = re.compile(r"срок|дедлайн|до \d{1,2}[.\s]|сдать|сдач|перенос|отмен|экзамен|зач[её]т|контрольн|"
                          r"ответ|прошу|просьба|необходимо|нужно|задани|лаборатор|долг|пересдач|оценк|"
                          r"домашн|тест|проект|защит|отч[её]т|присылайте|отправьте|загрузите|"
-                         r"\bhw\b|homework|deadline|\bdue\b|assignment|\bact\s*\d|\bp\.?\s*\d{2,3}\b|unit\s*\d", re.I)
+                         r"\bhw\b|homework|deadline|\bdue\b|assignment|\bact\s*\d|\bp\.?\s*\d{2,3}\b|unit\s*\d|"
+                         # повелительные формы и сроки словами (ревью Codex: «Пришлите работу
+                         # завтра» уходило в шум)
+                         r"пришл|сдай|сдайте|сделай|загруз|отправ|принес|подготов|напиш|ответь|скинь|"
+                         r"завтра|послезавтра|до (понедельн|вторн|сред|четверг|пятниц|суббот|воскресен|конца)", re.I)
 
 
 def _now():
@@ -48,8 +52,10 @@ def is_noise(e) -> bool:
     text = f"{e['title'] or ''} {e['body'] or ''}".strip()
     if len(re.sub(r"[\d:\s]", "", text)) < 15:          # «18:02», «yes», «5»
         return True
-    if e["source"] == "mail" and (NOISE_SENDERS.search(e["sender"] or "") or NOISE_SUBJECTS.search(e["title"] or "")):
-        return True
+    if e["source"] == "mail":
+        # Писем мало и они важнее: в шум — только явные рассылки и
+        # автоуведомления, остальное всегда смотрит модель.
+        return bool(NOISE_SENDERS.search(e["sender"] or "") or NOISE_SUBJECTS.search(e["title"] or ""))
     return not STUDY_WORDS.search(text)
 
 
@@ -75,15 +81,19 @@ def run(propose: bool = True) -> dict:
     conn = connect()
     try:
         rows = conn.execute(
+            # Новые события + те, что старая версия фильтра отсеяла как шум:
+            # при смене VERSION они перепроверяются (раньше версия ни на что
+            # не влияла — ревью Codex).
             "SELECT e.* FROM raw_events e LEFT JOIN extractions x ON x.event_id = e.id "
-            "WHERE x.event_id IS NULL AND e.source IN ('mail','messenger','vk','netology_notif') "
-            "AND e.observed_at >= ? ORDER BY e.id LIMIT 200", (since,)).fetchall()
+            "WHERE (x.event_id IS NULL OR (x.version != ? AND x.result_json LIKE '%\"skipped\"%')) "
+            "AND e.source IN ('mail','messenger','vk','netology_notif') "
+            "AND e.observed_at >= ? ORDER BY e.id LIMIT 200", (VERSION, since)).fetchall()
         noise, todo = [], []
         for e in rows:
             (noise if is_noise(e) else todo).append(e)
         with conn:
             for e in noise:
-                conn.execute("INSERT OR IGNORE INTO extractions(event_id, version, result_json, created_at) "
+                conn.execute("INSERT OR REPLACE INTO extractions(event_id, version, result_json, created_at) "
                              "VALUES (?,?,?,?)", (e["id"], VERSION, json.dumps({"skipped": "noise"}),
                                                   now.isoformat(timespec="seconds")))
     finally:
@@ -112,8 +122,14 @@ def run(propose: bool = True) -> dict:
         try:
             with conn:
                 for e in batch:
-                    res = results.get(e["id"], {"relevant": False})
-                    conn.execute("INSERT OR IGNORE INTO extractions(event_id, version, result_json, created_at) "
+                    res = results.get(e["id"])
+                    if res is None:
+                        # Модель пропустила пункт (обрезанный ответ) — не
+                        # записываем «нерелевантно», разберём в следующий раз.
+                        stats.setdefault("missing", 0)
+                        stats["missing"] += 1
+                        continue
+                    conn.execute("INSERT OR REPLACE INTO extractions(event_id, version, result_json, created_at) "
                                  "VALUES (?,?,?,?)", (e["id"], VERSION, json.dumps(res, ensure_ascii=False),
                                                       now.isoformat(timespec="seconds")))
         finally:
@@ -166,6 +182,9 @@ def propose_tasks(now) -> int:
                     f"<b>{dl[8:10]}.{dl[5:7]}</b>\n<i>{escape(res.get('summary', '')[:200])}</i>\nЗавести задачей?")
             kb = {"inline_keyboard": [[{"text": "✅ Завести", "callback_data": f"xt:{r['event_id']}:add"},
                                        {"text": "✖️ Не надо", "callback_data": f"xt:{r['event_id']}:no"}]]}
+            # Резерв ДО отправки: если процесс упадёт после отправки, но до
+            # записи статуса, предложение не уйдёт второй раз (ревью Codex).
+            _set_proposal(r["event_id"], "sending")
             try:
                 resp = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                                      json={"chat_id": MY_TELEGRAM_ID, "text": text, "parse_mode": "HTML",
@@ -175,35 +194,52 @@ def propose_tasks(now) -> int:
                     sent += 1
             except Exception as e:
                 print(f"agent_extract: не отправил предложение: {e!r}")
+            if status is None:
+                _set_proposal(r["event_id"], None)
         if status:
-            conn = connect()
-            try:
-                with conn:
-                    conn.execute("UPDATE extractions SET proposal_status=? WHERE event_id=?", (status, r["event_id"]))
-            finally:
-                conn.close()
+            _set_proposal(r["event_id"], status)
     return sent
+
+
+def _set_proposal(event_id: int, status):
+    from agent_db import connect
+    conn = connect()
+    try:
+        with conn:
+            conn.execute("UPDATE extractions SET proposal_status=? WHERE event_id=?", (status, event_id))
+    finally:
+        conn.close()
 
 
 def accept_proposal(event_id: int) -> dict | None:
     """Кнопка «✅ Завести» в боте — создаём задачу (source=manual)."""
     from agent_db import connect
     from storage import add_task
+    # Сначала атомарно «захватываем» предложение (двойное нажатие не создаст
+    # две задачи), потом создаём задачу, и только потом accepted; при
+    # ошибке — откат статуса (ревью Codex: раньше accepted ставился до
+    # создания задачи).
     conn = connect()
     try:
         with conn:
-            row = conn.execute("SELECT result_json, proposal_status FROM extractions WHERE event_id=?",
-                               (event_id,)).fetchone()
-            if not row or row["proposal_status"] != "proposed":
+            cur = conn.execute("UPDATE extractions SET proposal_status='accepting' WHERE event_id=? "
+                               "AND proposal_status IN ('proposed','sending')", (event_id,))
+            if cur.rowcount != 1:
                 return None
-            conn.execute("UPDATE extractions SET proposal_status='accepted' WHERE event_id=?", (event_id,))
+            row = conn.execute("SELECT result_json FROM extractions WHERE event_id=?", (event_id,)).fetchone()
     finally:
         conn.close()
-    res = json.loads(row["result_json"])
-    title = res["task_title"] + (f" ({res['course']})" if res.get("course") else "")
-    d = datetime.date.fromisoformat(res["deadline_iso"][:10])
-    deadline = datetime.datetime.combine(d, datetime.time(23, 59), tzinfo=UFA_TZ)
-    return add_task(title, deadline.isoformat(), "manual")
+    try:
+        res = json.loads(row["result_json"])
+        title = res["task_title"] + (f" ({res['course']})" if res.get("course") else "")
+        d = datetime.date.fromisoformat(res["deadline_iso"][:10])
+        deadline = datetime.datetime.combine(d, datetime.time(23, 59), tzinfo=UFA_TZ)
+        task = add_task(title, deadline.isoformat(), "manual")
+    except Exception:
+        _set_proposal(event_id, "proposed")
+        raise
+    _set_proposal(event_id, "accepted")
+    return task
 
 
 def reject_proposal(event_id: int) -> bool:
@@ -212,7 +248,7 @@ def reject_proposal(event_id: int) -> bool:
     try:
         with conn:
             cur = conn.execute("UPDATE extractions SET proposal_status='rejected' "
-                               "WHERE event_id=? AND proposal_status='proposed'", (event_id,))
+                               "WHERE event_id=? AND proposal_status IN ('proposed','sending')", (event_id,))
             return cur.rowcount > 0
     finally:
         conn.close()

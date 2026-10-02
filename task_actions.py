@@ -67,14 +67,30 @@ def delete_macos_reminders(title: str):
         pass
 
 
+def _journal_write(entry: dict):
+    """Журнал действий (data/task_actions.json). Вызывается ВНУТРИ локов
+    tasks → reminders: порядок локов один везде (tasks → reminders → actions),
+    иначе два процесса могли бы ждать друг друга вечно."""
+    with file_lock(ACTIONS_FILE):
+        actions = _read(ACTIONS_FILE, [])
+        actions = [a for a in actions if a.get("id") != entry["id"]] + [entry]
+        atomic_write_json(ACTIONS_FILE, actions[-ACTIONS_KEEP:])
+
+
 def complete_task(task_id, origin: str, expected_title: str | None = None,
                   delete_macos: bool = True) -> dict:
     """Закрыть задачу/напоминание по id. expected_title — защита от закрытия
     не той записи (окно на столе передаёт название, которое видел
     пользователь; если запись с этим id уже другая — отказываемся).
 
+    Журнал ДО записи (ревью Codex 2026-10-02): копия задачи и напоминаний
+    пишется в task_actions.json со статусом pending ПЕРЕД изменением данных,
+    затем committed. Если запись tasks.json упадёт после удаления
+    напоминаний — копия уже есть, undo_action её вернёт.
+
     Возвращает {"ok": bool, "error": str, "title": str, "action_id": str}."""
     task_id = str(task_id)
+    action_id = uuid.uuid4().hex[:12]
     with file_lock(TASKS_FILE):
         tasks = _read(TASKS_FILE, [])
         task = next((t for t in tasks if str(t.get("id")) == task_id), None)
@@ -98,27 +114,20 @@ def complete_task(task_id, origin: str, expected_title: str | None = None,
         with file_lock(REMINDERS_FILE):
             reminders = _read(REMINDERS_FILE, [])
             removed_reminders = [r for r in reminders if str(r.get("task_id")) == task_id]
+            entry = {
+                "id": action_id, "type": "complete", "origin": origin, "at": _now().isoformat(),
+                "task": backup_task, "task_removed": removed_task,
+                "reminders": removed_reminders, "undone": False, "status": "pending",
+            }
+            _journal_write(entry)
             if removed_reminders:
                 atomic_write_json(
                     REMINDERS_FILE,
                     [r for r in reminders if str(r.get("task_id")) != task_id],
                 )
-        atomic_write_json(TASKS_FILE, tasks)
-
-    action_id = uuid.uuid4().hex[:12]
-    with file_lock(ACTIONS_FILE):
-        actions = _read(ACTIONS_FILE, [])
-        actions.append({
-            "id": action_id,
-            "type": "complete",
-            "origin": origin,
-            "at": _now().isoformat(),
-            "task": backup_task,
-            "task_removed": removed_task,
-            "reminders": removed_reminders,
-            "undone": False,
-        })
-        atomic_write_json(ACTIONS_FILE, actions[-ACTIONS_KEEP:])
+            atomic_write_json(TASKS_FILE, tasks)
+            entry["status"] = "committed"
+            _journal_write(entry)
 
     if delete_macos:
         delete_macos_reminders(title)
@@ -126,38 +135,42 @@ def complete_task(task_id, origin: str, expected_title: str | None = None,
 
 
 def undo_action(action_id: str) -> dict:
-    """Вернуть задачу и её напоминания ровно в состояние до complete_task."""
-    with file_lock(ACTIONS_FILE):
-        actions = _read(ACTIONS_FILE, [])
-        action = next((a for a in actions if a.get("id") == action_id), None)
-        if not action:
-            return {"ok": False, "error": "действие не найдено (слишком старое?)"}
-        if action.get("undone"):
-            return {"ok": False, "error": "уже отменено"}
-        try:
-            age = _now() - datetime.datetime.fromisoformat(action["at"])
-            if age > datetime.timedelta(hours=UNDO_WINDOW_HOURS):
-                return {"ok": False, "error": f"прошло больше {UNDO_WINDOW_HOURS} ч — верни вручную"}
-        except Exception:
-            pass
+    """Вернуть задачу и её напоминания ровно в состояние до complete_task.
+    Работает и для pending-записи (операция оборвалась посередине)."""
+    snapshot = next((a for a in _read(ACTIONS_FILE, []) if a.get("id") == action_id), None)
+    if not snapshot:
+        return {"ok": False, "error": "действие не найдено (слишком старое?)"}
+    try:
+        age = _now() - datetime.datetime.fromisoformat(snapshot["at"])
+        if age > datetime.timedelta(hours=UNDO_WINDOW_HOURS):
+            return {"ok": False, "error": f"прошло больше {UNDO_WINDOW_HOURS} ч — верни вручную"}
+    except Exception:
+        pass
 
-        backup = action["task"]
-        task_id = str(backup.get("id"))
-        with file_lock(TASKS_FILE):
-            tasks = _read(TASKS_FILE, [])
-            current = next((t for t in tasks if str(t.get("id")) == task_id), None)
-            if action.get("task_removed"):
-                if current is None:
+    backup = snapshot["task"]
+    task_id = str(backup.get("id"))
+    # Порядок локов тот же, что в complete_task: tasks → reminders → actions.
+    with file_lock(TASKS_FILE):
+        with file_lock(REMINDERS_FILE):
+            with file_lock(ACTIONS_FILE):
+                actions = _read(ACTIONS_FILE, [])
+                action = next((a for a in actions if a.get("id") == action_id), None)
+                if not action or action.get("undone"):
+                    return {"ok": False, "error": "уже отменено"}
+
+                tasks = _read(TASKS_FILE, [])
+                current = next((t for t in tasks if str(t.get("id")) == task_id), None)
+                if action.get("task_removed"):
+                    if current is None:
+                        tasks.append(backup)
+                elif current is not None:
+                    current["done"] = False
+                    current.pop("done_at", None)
+                    current.pop("manually_done", None)
+                else:
                     tasks.append(backup)
-            elif current is not None:
-                current["done"] = False
-                current.pop("done_at", None)
-                current.pop("manually_done", None)
-            else:
-                tasks.append(backup)
 
-            if action.get("reminders"):
-                with file_lock(REMINDERS_FILE):
+                if action.get("reminders"):
                     reminders = _read(REMINDERS_FILE, [])
                     have = {r.get("id") for r in reminders}
                     now = _now()
@@ -175,9 +188,9 @@ def undo_action(action_id: str) -> dict:
                         r.pop("last_message_id", None)
                         reminders.append(r)
                     atomic_write_json(REMINDERS_FILE, reminders)
-            atomic_write_json(TASKS_FILE, tasks)
+                atomic_write_json(TASKS_FILE, tasks)
 
-        action["undone"] = True
-        action["undone_at"] = _now().isoformat()
-        atomic_write_json(ACTIONS_FILE, actions)
+                action["undone"] = True
+                action["undone_at"] = _now().isoformat()
+                atomic_write_json(ACTIONS_FILE, actions)
     return {"ok": True, "error": "", "title": backup.get("title", "")}

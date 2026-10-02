@@ -339,6 +339,26 @@ def _grades_week(now) -> str:
                      if not re.fullmatch(r"оценка 0(\.0+)?", (r["body"] or "").strip()))
 
 
+BLOCK_MAX_CHARS = 3500     # один блок сводки
+PACK_MAX_CHARS = 26000     # вся сводка (~10–12 тыс. токенов) — жёсткий потолок
+
+
+def _cap(parts: list[str]) -> str:
+    """Общий предел размера сводки (ревью Codex: профиль, дневник, задачи
+    растут без ограничений). Блоки идут по важности — сверху; хвост, не
+    влезающий в предел, отбрасываем с пометкой, а не молча."""
+    out, used = [], 0
+    for p in parts:
+        if len(p) > BLOCK_MAX_CHARS:
+            p = p[:BLOCK_MAX_CHARS] + "\n… (блок обрезан)"
+        if used + len(p) > PACK_MAX_CHARS:
+            out.append("=== (остальные блоки не поместились в лимит сводки) ===")
+            break
+        out.append(p)
+        used += len(p) + 2
+    return "\n\n".join(out)
+
+
 def build_checkin_pack(slot: str, extra_blocks: list[str] | None = None) -> str:
     import sys
     sys.path.insert(0, os.path.join(PROJECT_DIR, "scripts"))
@@ -384,7 +404,7 @@ def build_checkin_pack(slot: str, extra_blocks: list[str] | None = None) -> str:
         body = (makers[k]() or "").strip()
         if body:
             parts.append(f"=== {TITLES[k]} ===\n{body}")
-    return "\n\n".join(parts)
+    return _cap(parts)
 
 
 # ─── контекст для разговора с ботом (bot/smart_intent.py) ───────────
@@ -484,4 +504,4 @@ def build_chat_pack(user_text: str) -> str:
     study = _study_analysis(now)
     if study:
         parts.append(f"=== БАЛЛЫ И ПОСЕЩАЕМОСТЬ ===\n{study[:1500]}")
-    return "\n\n".join(parts)
+    return _cap(parts)

@@ -59,12 +59,15 @@ def collect(now) -> list[dict]:
     from mentor_dashboard import build_model
     out = []
     since = (now - datetime.timedelta(hours=3)).isoformat(timespec="seconds")
+    # Оценки ищем за 12 ч: двойка, пришедшая ночью, дождётся утра (тихие
+    # часы), а не выпадет из 3-часового окна. Повтор гасит notification_state.
+    grades_since = (now - datetime.timedelta(hours=12)).isoformat(timespec="seconds")
 
     conn = connect()
     try:
         # COALESCE: событие, залитое задним числом, не должно выглядеть свежим.
         for e in conn.execute("SELECT * FROM raw_events WHERE kind='grade' "
-                              "AND COALESCE(occurred_at, observed_at) >= ?", (since,)):
+                              "AND COALESCE(occurred_at, observed_at) >= ?", (grades_since,)):
             meta = json.loads(e["meta_json"] or "{}")
             value = str(meta.get("value", "")).strip()
             try:
@@ -110,7 +113,9 @@ def collect(now) -> list[dict]:
     today = now.date().isoformat()
     for c in list_commitments("open", 50):
         if c.get("due_at") and c["due_at"][:10] < today:
-            out.append({"reason": "commitment_overdue", "fp": _fp("commit", c["id"], today),
+            # Отпечаток по id обещания, без даты: иначе одно и то же
+            # просроченное обещание считалось новым поводом каждый день.
+            out.append({"reason": "commitment_overdue", "fp": _fp("commit", c["id"]),
                         "urgency": 15, "importance": 10, "actionability": 10,
                         "text": f"Обещание «{c['action']}» — срок {c['due_at'][:10]} прошёл"})
     return out
@@ -129,7 +134,8 @@ def score(c: dict, state: dict | None, now) -> float:
         repetition += min(30, 10 * (state["times_sent"] or 0))
     if state and state["dismissed"]:
         repetition = 100
-    quiet = 100 if (now.hour >= QUIET_FROM or now.hour < QUIET_TO) and c["reason"] != "grade_low" else 0
+    # Тихие часы — для всех поводов, включая двойку: она дождётся утра.
+    quiet = 100 if (now.hour >= QUIET_FROM or now.hour < QUIET_TO) else 0
     return s + novelty - repetition - quiet
 
 
@@ -152,7 +158,10 @@ def _threshold() -> float:
     try:
         with open(os.path.join(PROJECT_DIR, "data", "mentor_feedback.jsonl"), encoding="utf-8") as f:
             for line in f:
-                r = json.loads(line)
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue   # одна битая строка не должна обнулять учёт 👎
                 dislikes += r.get("feedback_id") in ids and r.get("rating") == "down"
     except FileNotFoundError:
         pass
@@ -233,24 +242,36 @@ def send_initiative(items: list[dict], now) -> bool:
         print(f"agent_triggers: не сформулировал ({err})")
         return False
     fid = uuid.uuid4().hex[:10]
-    try:
-        send_telegram(text, feedback_id=fid)
-    except Exception as e:
-        print(f"agent_triggers: не отправил: {e!r}")
-        return False
-    record_sent("initiative", text, fid)
+    # Резервируем ДО отправки (лимиты и повторы считаются по этим записям):
+    # падение после отправки не приведёт к дублю. Если отправка не удалась —
+    # резерв снимаем (ревью Codex).
     conn = connect()
     try:
         with conn:
-            conn.execute("INSERT INTO initiative_sent(at, fingerprints, text) VALUES (?,?,?)",
-                         (now.isoformat(timespec="seconds"),
-                          json.dumps({"fps": [i["fp"] for i in items], "feedback_id": fid}), text))
+            row_id = conn.execute("INSERT INTO initiative_sent(at, fingerprints, text) VALUES (?,?,?)",
+                                  (now.isoformat(timespec="seconds"),
+                                   json.dumps({"fps": [i["fp"] for i in items], "feedback_id": fid}), text)).lastrowid
             for i in items:
                 conn.execute("INSERT INTO notification_state(fingerprint, last_sent, times_sent) VALUES (?,?,1) "
                              "ON CONFLICT(fingerprint) DO UPDATE SET last_sent=excluded.last_sent, "
                              "times_sent=times_sent+1", (i["fp"], now.isoformat()))
     finally:
         conn.close()
+    try:
+        send_telegram(text, feedback_id=fid)
+    except Exception as e:
+        print(f"agent_triggers: не отправил: {e!r}")
+        conn = connect()
+        try:
+            with conn:
+                conn.execute("DELETE FROM initiative_sent WHERE id=?", (row_id,))
+                for i in items:
+                    conn.execute("UPDATE notification_state SET last_sent=NULL, times_sent=MAX(times_sent-1, 0) "
+                                 "WHERE fingerprint=?", (i["fp"],))
+        finally:
+            conn.close()
+        return False
+    record_sent("initiative", text, fid)
     return True
 
 

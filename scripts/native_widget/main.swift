@@ -213,6 +213,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNa
     func today() -> String {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
+        // Сутки — по часовому поясу проекта (config.UFA_TZ), не системному.
+        f.timeZone = TimeZone(identifier: "Asia/Yekaterinburg")
         return f.string(from: Date())
     }
 

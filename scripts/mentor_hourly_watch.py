@@ -153,7 +153,7 @@ def diff_snapshots(old: dict, new: dict) -> list:
 
 def _is_desktop_relevant(old: dict, new: dict) -> bool:
     """Окно на столе показывает только 4 фиксированные категории: расписание,
-    дедлайны, срочно сегодня, просрочено. Оценки и почта в него не попадают —
+    напоминания, дедлайны, просрочено. Оценки и почта в него не попадают —
     полная перегенерация (отдельный дорогой вызов claude -p) имеет смысл
     только для изменений, которые реально видны на экране; для остальных
     изменений хватает записи в логе — списки окно и так пересобирает само."""
@@ -246,7 +246,8 @@ def agent_maintenance(old: dict | None, new: dict):
         res = agent_triggers.run()
         logged = [r for r in res if r["logged"]]
         if logged:
-            log("triggers (shadow): " + "; ".join(f"{r['decision']} {r['score']:.0f} {r['reason']}" for r in logged))
+            mode = "shadow" if agent_triggers.SHADOW else "live"
+            log(f"triggers ({mode}): " + "; ".join(f"{r['decision']} {r['score']:.0f} {r['reason']}" for r in logged))
     except Exception as e:
         log(f"triggers: ошибка: {e!r}")
 

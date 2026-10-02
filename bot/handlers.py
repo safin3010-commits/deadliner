@@ -972,7 +972,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not selected:
             await query.answer("Ничего не выбрано!")
             return
-        count = sum(1 for tid in selected if mark_task_done(tid, manually=True))
+        # Через общий путь закрытия (task_actions): снимаются и напоминания
+        # задачи, и есть откат — раньше mark_task_done напрямую оставлял
+        # напоминания звонить (ревью Codex 2026-10-02).
+        from task_actions import complete_task
+        count = sum(1 for tid in selected if complete_task(tid, origin="bot_batch_done")["ok"])
         context.user_data["done_selected"] = []
         await query.edit_message_reply_markup(reply_markup=None)
 
@@ -1162,16 +1166,22 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split(":")
         task_id = parts[1] if len(parts) > 1 else ""
         rem_id = parts[2] if len(parts) > 2 else ""
-        from reminders import delete_reminder
-        if rem_id:
-            delete_reminder(rem_id)
+        await query.edit_message_reply_markup(reply_markup=None)
         if task_id:
             # Общая логика с окном наставника на столе: reminder_only
-            # удаляется, обычная задача → done, снимаются ВСЕ её напоминания.
+            # удаляется, обычная задача → done, снимаются ВСЕ её напоминания
+            # (включая это — поэтому вручную его не удаляем: иначе оно не
+            # попало бы в копию для отката).
             from task_actions import complete_task
-            complete_task(task_id, origin="bot_reminder_button")
-        await query.edit_message_reply_markup(reply_markup=None)
-        await query.message.reply_text("✅ Готово, напоминание удалено!")
+            result = complete_task(task_id, origin="bot_reminder_button")
+            if result["ok"]:
+                await query.message.reply_text("✅ Готово, закрыто и напоминания сняты.")
+            else:
+                await query.message.reply_text(f"Не закрыто: {result['error']}")
+        elif rem_id:
+            from reminders import delete_reminder
+            delete_reminder(rem_id)
+            await query.message.reply_text("✅ Напоминание удалено.")
 
     elif data.startswith("rem_delete:"):
         # Удалить напоминание и связанную reminder_only задачу
@@ -1411,7 +1421,12 @@ async def tokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today, week = defaultdict(lambda: [0, 0]), defaultdict(lambda: [0, 0])
     try:
         with open("data/agent_calls.jsonl", encoding="utf-8") as f:
-            rows = [_json.loads(l) for l in f if l.strip()]
+            rows = []
+            for l in f:
+                try:
+                    rows.append(_json.loads(l))
+                except _json.JSONDecodeError:
+                    continue   # одна битая строка не ломает отчёт
     except FileNotFoundError:
         rows = []
     for r in rows:
@@ -1436,7 +1451,10 @@ async def tokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         with open("data/mentor_feedback.jsonl", encoding="utf-8") as f:
             for l in f:
-                r = _json.loads(l)
+                try:
+                    r = _json.loads(l)
+                except _json.JSONDecodeError:
+                    continue
                 if (now - datetime.datetime.fromisoformat(r["at"])).days < 7:
                     up += r.get("rating") == "up"
                     down += r.get("rating") == "down"

@@ -86,7 +86,7 @@ def _parse_dt(value) -> datetime.datetime | None:
 
 def short_course(course: str | None) -> str:
     """"3 семестр: Базы данных" → "Базы данных";
-    "Дискретная математика 2 (3 семестр), группы ЛБ-17…" → "Дискретная математика 2"."""
+    "Дискретная математика 2 (3 семестр), группы …" → "Дискретная математика 2"."""
     if not course:
         return ""
     c = re.sub(r"^\s*\d+\s*семестр:\s*", "", course)
@@ -343,53 +343,57 @@ def build_schedule(day: datetime.date) -> dict:
     iso = day.isoformat()
     lines, notes = [], []
 
+    # Основа — официальное расписание из кэша (Modeus + Нетология).
+    cache = _load("schedule_cache.json", {})
+    lxp_ids = _yac_lxp_ids()
+    links = _yac_links(day)
+    for week in cache.values():
+        if not isinstance(week, dict):
+            continue
+        for src in ("data", "netology"):
+            for lesson in (week.get(src) or {}).get(iso) or []:
+                start = _parse_dt(lesson.get("start"))
+                end = _parse_dt(lesson.get("end"))
+                if not start:
+                    continue
+                label = short_course(lesson.get("course_name"))
+                name = (lesson.get("name") or "").strip()
+                if name:
+                    label = f"{label}: {name}" if label else name
+                loc = lesson.get("location") or ""
+                is_lxp = loc == "LXP" or lesson.get("id") in lxp_ids
+                if is_lxp:
+                    lines.append({"time": "LXP", "label": label, "url": "", "start": None, "end": None})
+                    continue
+                if src == "netology":
+                    spans = [(start, start + datetime.timedelta(minutes=90))]
+                else:
+                    spans = _split_pairs(start, end)
+                for s_, e_ in spans:
+                    hhmm = s_.strftime("%H:%M")
+                    url = links.get(hhmm) or (loc if src == "netology" and loc.startswith("http") else "")
+                    lines.append({"time": hhmm, "label": label, "url": url, "start": s_, "end": e_})
+
+    # Сводка из беседы ВК — ТОЛЬКО дополнение: её разбирает модель, и раньше
+    # она целиком заменяла официальное расписание (одна ошибка модели меняла
+    # пары на столе — ревью Codex). Теперь добавляем лишь то, чего в кэше нет
+    # (обычно вебинары на my.mts-link.ru), с явной пометкой «из ВК».
     digest = _load("schedule_vk_digest.json", {})
-    if digest.get("date") == iso and digest.get("items"):
-        # Сводка из беседы ВК — полнее Modeus (вебинары на my.mts-link.ru).
-        for it in digest["items"]:
+    if digest.get("date") == iso:
+        have_times = {l["time"] for l in lines if l["start"]}
+        for it in digest.get("items", []):
             is_lxp = "асинхрон" in (it.get("time", "") + it.get("format", "")).lower()
-            start = None
-            if not is_lxp and re.match(r"^\d{1,2}:\d{2}$", it.get("time", "")):
-                h, m = map(int, it["time"].split(":"))
-                start = datetime.datetime.combine(day, datetime.time(h, m), tzinfo=UFA_TZ)
-            label = it.get("subject", "")
-            if it.get("topic"):
-                label += f": {it['topic']}"
-            lines.append({
-                "time": "LXP" if is_lxp else (it.get("time") or "?"),
-                "label": label, "url": it.get("url") or "",
-                "start": start, "end": start + datetime.timedelta(minutes=90) if start else None,
-            })
-    else:
-        cache = _load("schedule_cache.json", {})
-        lxp_ids = _yac_lxp_ids()
-        links = _yac_links(day)
-        for week in cache.values():
-            if not isinstance(week, dict):
+            label = it.get("subject", "") + (f": {it['topic']}" if it.get("topic") else "")
+            if is_lxp:
+                if not any(it.get("subject", "").lower()[:12] in l["label"].lower() for l in lines if not l["start"]):
+                    lines.append({"time": "LXP", "label": f"{label} (из ВК)", "url": "", "start": None, "end": None})
                 continue
-            for src in ("data", "netology"):
-                for lesson in (week.get(src) or {}).get(iso) or []:
-                    start = _parse_dt(lesson.get("start"))
-                    end = _parse_dt(lesson.get("end"))
-                    if not start:
-                        continue
-                    label = short_course(lesson.get("course_name"))
-                    name = (lesson.get("name") or "").strip()
-                    if name:
-                        label = f"{label}: {name}" if label else name
-                    loc = lesson.get("location") or ""
-                    is_lxp = loc == "LXP" or lesson.get("id") in lxp_ids
-                    if is_lxp:
-                        lines.append({"time": "LXP", "label": label, "url": "", "start": None, "end": None})
-                        continue
-                    if src == "netology":
-                        spans = [(start, start + datetime.timedelta(minutes=90))]
-                    else:
-                        spans = _split_pairs(start, end)
-                    for s, e in spans:
-                        hhmm = s.strftime("%H:%M")
-                        url = links.get(hhmm) or (loc if src == "netology" and loc.startswith("http") else "")
-                        lines.append({"time": hhmm, "label": label, "url": url, "start": s, "end": e})
+            if not re.match(r"^\d{1,2}:\d{2}$", it.get("time", "")) or it["time"].zfill(5) in have_times:
+                continue
+            h, m = map(int, it["time"].split(":"))
+            start = datetime.datetime.combine(day, datetime.time(h, m), tzinfo=UFA_TZ)
+            lines.append({"time": it["time"].zfill(5), "label": f"{label} (из ВК)", "url": it.get("url") or "",
+                          "start": start, "end": start + datetime.timedelta(minutes=90)})
 
     timed = sorted((l for l in lines if l["start"]), key=lambda l: l["start"])
     lxp = [l for l in lines if not l["start"]]
